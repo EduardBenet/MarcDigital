@@ -1,5 +1,5 @@
 # MarcDigital
-This project aims to create a digital frame for old people
+This project aims to create a digital frame for old people where the rest of the family can easily push photos.
 
 ## Requirements
 - Synch with a Google Fotos album. One for now, maybe more in the future.
