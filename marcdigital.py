@@ -1,3 +1,5 @@
+#!/bin/python
+
 import os
 import gi
 
@@ -23,7 +25,7 @@ class ImageGallery(Gtk.Window):
         self.connect("key-press-event", self.on_key_press_event)              
         
         # Images will be synched in folder images by a separate process, grab and sort them
-        self.image_folder = "images"
+        self.image_folder = "/home/pi/Documents/MarcDigital/images"
         self.image_files = sorted([f for f in os.listdir(self.image_folder)])
         self.current_image = 0
 

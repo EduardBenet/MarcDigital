@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=MarcDigital
+Exec=/usr/bin/python3 /home/pi/Documents/MarcDigital/marcdigital.py
+Hidden=False
+NoDisplay=False
+X-GNOME-Autostart-enabled=Tru
+Comment=Start marc digital on login
