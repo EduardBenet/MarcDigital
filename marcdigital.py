@@ -81,7 +81,7 @@ class ImageGallery(Gtk.Window):
         # add an event, on the desired pin while rising
         # To avoid switch bouncing, which can cause edge RISING to be detected more than once, we add bouncetime
         GPIO.add_event_detect(leftPin, GPIO.RISING, callback = lambda channel: self.on_prev_button_clicked(None), bouncetime = 1000)
-        GPIO.add_event_detect(rightPin, GPIO.RISING, callback = lambda channel: self.on_next_button_clicked(None), bouncetime = 1000)m
+        GPIO.add_event_detect(rightPin, GPIO.RISING, callback = lambda channel: self.on_next_button_clicked(None), bouncetime = 1000)
 
     def on_key_press_event(self, widget, event):
         if event.keyval == Gdk.KEY_Escape: # Check if key presed is ESC
