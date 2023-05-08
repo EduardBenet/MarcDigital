@@ -15,7 +15,7 @@ class ImageGallery(Gtk.Window):
         super().__init__()
         # Initialize screen info for reuse
         self._get_screen_info()
-        #self.fullscreen()
+        self.fullscreen()
         
         # Add destroy callback when shutdown
         self.connect("destroy", Gtk.main_quit)
