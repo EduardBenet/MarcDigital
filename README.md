@@ -14,3 +14,7 @@ Because this is aimed to old people, the app needs to auto-star with the raspber
 mkdir -p /home/pi/.config/autostart
 cp marcdigital.desktop /home/pi/.config/autostart/marcdigital.desktop
 ```
+
+This will start the app. In this first iteration I am doing the synching of the pictures separately.
+
+### For the synching
