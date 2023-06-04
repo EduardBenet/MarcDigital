@@ -31,7 +31,7 @@ def get_access_token():
     data = {
         'client_id': g_creds['installed']['client_id'],
         'client_secret':  g_creds['installed']['client_secret'],
-        'refresh_token': refresh_token.token,
+        'refresh_token': refresh_token.refresh_token,
         'grant_type': 'refresh_token'
     }
     response = requests.post('https://oauth2.googleapis.com/token', data = data)
