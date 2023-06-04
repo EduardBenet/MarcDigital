@@ -2,14 +2,24 @@
 
 import os
 import gi
-
 import RPi.GPIO as GPIO
+from gcloudsync import sync_google_photos_album
 
 # Set up the GPIO mode to use the BCM numbering
 GPIO.setmode(GPIO.BCM)
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk, GdkPixbuf
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Gio
+
+# Time to rotate images in seconds
+IMAGE_TIMER = 3
+# Download Directory
+DOWNLOAD_DIRECTORY = '/home/pi/Documents/MarcDigital/images'
+# Google Photos Album ID
+ALBUM_ID = 'AF9Qav513ch3z47nnhS2d-REj_nXfAS7f3gErmU_62VUsZPgcHYe_x56yWE0AvNxO9kG_M7BmM8D'
+
+# SyncFrequency
+SYNC_FREQ = 30*1000
 
 class ImageGallery(Gtk.Window):
 
@@ -22,13 +32,13 @@ class ImageGallery(Gtk.Window):
         # Add destroy callback when shutdown
         self.connect("destroy", Gtk.main_quit)
         self.connect("destroy", lambda w: GPIO.cleanup())
-        self.connect("key-press-event", self.on_key_press_event)              
-        
-        # Images will be synched in folder images by a separate process, grab and sort them
-        self.image_folder = "/home/pi/Documents/MarcDigital/images"
-        self.image_files = sorted([f for f in os.listdir(self.image_folder)])
-        self.current_image = 0
+        self.connect("key-press-event", self.on_key_press_event) 
 
+        # Add timer to auto-rotate images      
+        self.addTimer(IMAGE_TIMER*1000, self.timerFunction)    
+        # Add timer to sync images
+        self.addTimer(SYNC_FREQ, self.syncFunction )        
+        
         # Create an overlay to statck the image and the spinner widgets
         self.overlay = Gtk.Overlay()
         self.image = Gtk.Image()
@@ -38,6 +48,14 @@ class ImageGallery(Gtk.Window):
         self.spinner = Gtk.Spinner()
         self.spinner.hide()
         self.overlay.add_overlay(self.spinner) # Add the spinner widget to the overlay
+
+        # Images will be synched in folder images by a separate process, grab and sort them
+        self.getImages()
+
+        # Add folder monitoring
+        ImagesFolder = Gio.File.new_for_path(DOWNLOAD_DIRECTORY)
+        self.monitor = ImagesFolder.monitor_directory(Gio.FileMonitorFlags.NONE, None)
+        self.monitor.connect("changed", self._on_images_changed)
 
         # Initialize an image object and load the first image    
         self.load_image()
@@ -67,7 +85,15 @@ class ImageGallery(Gtk.Window):
 
         self.add(self.main_box)
         self.show_all()
-
+        
+    def getImages(self):
+        self.image_folder = "/home/pi/Documents/MarcDigital/images"
+        self.image_files = sorted([f for f in os.listdir(self.image_folder)])
+        self.on_home_button_clicked(None)  
+    
+    def _on_images_changed(self, monitor, file, other_file, event_tile):
+        self.getImages()
+        
     def _get_screen_info(self):
         monitor = Gdk.Display.get_default().get_primary_monitor()
         geometry = monitor.get_geometry()
@@ -110,27 +136,55 @@ class ImageGallery(Gtk.Window):
         self.image.show()
         self.spinner.stop()
         self.spinner.hide()
-
-        
-    def on_prev_button_clicked(self, button):
-        self.current_image -= 1
-        if self.current_image < 0:
-            self.current_image = len(self.image_files) - 1
-        self.load_image()
-
-    def on_next_button_clicked(self, button):
+    
+    def go_to_next_image(self):
         self.current_image += 1
         if self.current_image >= len(self.image_files):
             self.current_image = 0
         self.load_image()
+    
+    def go_to_prev_image(self):
+        self.current_image -= 1
+        if self.current_image < 0:
+            self.current_image = len(self.image_files) - 1
+        self.load_image()
+        
+    def on_prev_button_clicked(self, button):
+        self.reset_timer()
+        self.go_to_prev_image()
+
+    def on_next_button_clicked(self, button):
+        self.reset_timer()
+        self.go_to_next_image()        
 
     def on_home_button_clicked(self, button):
         self.current_image = 0
         self.load_image()
+
+    def addTimer(self, time, function):
+        self.timer_id = GLib.timeout_add(time, function)
+
+    def timerFunction(self):
+        self.go_to_next_image()
+        return True # This ensures that the timer will run again, return False to make it run only once.
+    
+    def reset_timer(self):
+        # Remove the old timer
+        GLib.source_remove(self.timer_id)
+        # Add a new timer
+        self.addTimer(IMAGE_TIMER*1000, self.timerFunction)
+    
+    def syncFunction(self):
+        sync_google_photos_album(ALBUM_ID, DOWNLOAD_DIRECTORY, fullImage = True)
+        return True
         
 def main():
     app = ImageGallery()
     Gtk.main()
 
 if __name__=="__main__":
+    # Update images
+    #os.makedirs(DOWNLOAD_DIRECTORY, exist_ok=True)
+    #sync_google_photos_album(ALBUM_ID, DOWNLOAD_DIRECTORY, fullImage = True)
+
     main()

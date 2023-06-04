@@ -105,4 +105,4 @@ def download_image(url, file_path):
 if __name__ == '__main__':
     download_directory = '/home/pi/Documents/MarcDigital/images'
     os.makedirs(download_directory, exist_ok=True)
-    sync_google_photos_album('AF9Qav513ch3z47nnhS2d-REj_nXfAS7f3gErmU_62VUsZPgcHYe_x56yWE0AvNxO9kG_M7BmM8D', download_directory, fullImage = True)
+    sync_google_photos_album('AF9Qav513ch3z47nnhS2d-REj_nXfAS7f3gErmU_62VUsZPgcHYe_x56yWE0AvNxO9kG_M7BmM8D', download_directory, fullImage = False)
