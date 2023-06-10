@@ -86,6 +86,9 @@ def sync_google_photos_album(album_id, download_directory, fullImage = True):
             newImage = os.path.join(download_directory, file_name)
             if not os.path.exists(newImage):
                 download_image(file_url, newImage)
+                # I don't want more than one download per sync. 
+                # This could potentially take a very long time and it does not really matter if we sync along an entire day.
+                break
 
         # Remove the files in disk no longer in the cloud
         toRemove = currentFiles - cloudImages

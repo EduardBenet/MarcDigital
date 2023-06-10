@@ -51,6 +51,8 @@ class ImageGallery(Gtk.Window):
 
         # Images will be synched in folder images by a separate process, grab and sort them
         self.getImages()
+        if len(self.image_files) == 0:
+            self.syncFunction()
 
         # Add folder monitoring
         ImagesFolder = Gio.File.new_for_path(DOWNLOAD_DIRECTORY)
@@ -125,17 +127,18 @@ class ImageGallery(Gtk.Window):
         self.spinner.start()
         self.image.hide()
 
-        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-            os.path.join(self.image_folder, self.image_files[self.current_image]), 
-            self._width, 
-            self._height, 
-            preserve_aspect_ratio=True,
-        )
+        if len(self.image_files) > 0:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                os.path.join(self.image_folder, self.image_files[self.current_image]), 
+                self._width, 
+                self._height, 
+                preserve_aspect_ratio=True,
+            )
 
-        self.image.set_from_pixbuf(pixbuf)
-        self.image.show()
-        self.spinner.stop()
-        self.spinner.hide()
+            self.image.set_from_pixbuf(pixbuf)
+            self.image.show()
+            self.spinner.stop()
+            self.spinner.hide()
     
     def go_to_next_image(self):
         self.current_image += 1
@@ -183,8 +186,4 @@ def main():
     Gtk.main()
 
 if __name__=="__main__":
-    # Update images
-    #os.makedirs(DOWNLOAD_DIRECTORY, exist_ok=True)
-    #sync_google_photos_album(ALBUM_ID, DOWNLOAD_DIRECTORY, fullImage = True)
-
     main()
