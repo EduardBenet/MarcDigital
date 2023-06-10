@@ -34,19 +34,22 @@ class ImageGallery(Gtk.Window):
         self.connect("destroy", lambda w: GPIO.cleanup())
         self.connect("key-press-event", self.on_key_press_event) 
 
+        # Add timers
+        self.timer_id = {}
         # Add timer to auto-rotate images      
-        self.addTimer(IMAGE_TIMER*1000, self.timerFunction)    
+        self.addTimer(IMAGE_TIMER*1000, self.timerFunction, "imageRotation")    
         # Add timer to sync images
-        self.addTimer(SYNC_FREQ, self.syncFunction )        
+        self.addTimer(SYNC_FREQ, self.syncFunction , "imageSync")        
         
         # Create an overlay to statck the image and the spinner widgets
         self.overlay = Gtk.Overlay()
         self.image = Gtk.Image()
         self.overlay.add(self.image)
 
-        # Create a  spinner and initially hide it
+        # Create a  spinner and initially hide it        
         self.spinner = Gtk.Spinner()
         self.spinner.hide()
+
         self.overlay.add_overlay(self.spinner) # Add the spinner widget to the overlay
 
         # Images will be synched in folder images by a separate process, grab and sort them
@@ -123,10 +126,10 @@ class ImageGallery(Gtk.Window):
 
     def load_image(self):   
 
+        self.image.set_from_pixbuf(None)
         self.spinner.show()     
         self.spinner.start()
-        self.image.hide()
-
+        
         if len(self.image_files) > 0:
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
                 os.path.join(self.image_folder, self.image_files[self.current_image]), 
@@ -136,7 +139,6 @@ class ImageGallery(Gtk.Window):
             )
 
             self.image.set_from_pixbuf(pixbuf)
-            self.image.show()
             self.spinner.stop()
             self.spinner.hide()
     
@@ -153,29 +155,29 @@ class ImageGallery(Gtk.Window):
         self.load_image()
         
     def on_prev_button_clicked(self, button):
-        self.reset_timer()
+        self.reset_timer("imageRotation")
         self.go_to_prev_image()
 
     def on_next_button_clicked(self, button):
-        self.reset_timer()
+        self.reset_timer("imageRotation")
         self.go_to_next_image()        
 
     def on_home_button_clicked(self, button):
         self.current_image = 0
         self.load_image()
 
-    def addTimer(self, time, function):
-        self.timer_id = GLib.timeout_add(time, function)
+    def addTimer(self, time, function, name):
+        self.timer_id[name] = GLib.timeout_add(time, function)
 
     def timerFunction(self):
         self.go_to_next_image()
         return True # This ensures that the timer will run again, return False to make it run only once.
     
-    def reset_timer(self):
+    def reset_timer(self, name):
         # Remove the old timer
-        GLib.source_remove(self.timer_id)
+        GLib.source_remove(self.timer_id[name])
         # Add a new timer
-        self.addTimer(IMAGE_TIMER*1000, self.timerFunction)
+        self.addTimer(IMAGE_TIMER*1000, self.timerFunction, name)
     
     def syncFunction(self):
         sync_google_photos_album(ALBUM_ID, DOWNLOAD_DIRECTORY, fullImage = True)
