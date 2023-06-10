@@ -1,0 +1,5 @@
+# Ignore saved tokens
+*.pickle
+
+# Ignore credentials
+*.json
