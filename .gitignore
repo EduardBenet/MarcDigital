@@ -3,3 +3,13 @@
 
 # Ignore credentials
 *.json
+
+# Any image
+*.png
+*.jpg
+
+# Python byte-compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
