@@ -72,21 +72,14 @@ class ImageGallery(Gtk.Window):
         self.next_button = Gtk.Button.new_from_icon_name("go-next", Gtk.IconSize.BUTTON)
         self.next_button.connect("clicked", self.on_next_button_clicked)
 
-        self.home_button = Gtk.Button.new_from_icon_name("go-home", Gtk.IconSize.BUTTON)
-        self.home_button.connect("clicked", self.on_home_button_clicked)
-
-        self.button_box = Gtk.Box(orientation = Gtk.Orientation.HORIZONTAL)
-        self.button_box.pack_start(self.prev_button, True, True, 0) # adds button to button box container with fill extra space, make button fill all space, pixles between button and box      
-        self.button_box.pack_start(self.home_button, True, True, 0)
-        self.button_box.pack_start(self.next_button, True, True, 0)
-
         # Connect the Raspberry pi buttons to the gallery
         self.connectRPIbuttons(17,27)  
 
         # Create the main Gtk Box and add both image and buttons
-        self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.main_box.pack_start(self.prev_button, False, False, 0) # adds button to button box container with fill extra space, make button fill all space, pixles between button and box      
         self.main_box.pack_start(self.overlay, True, True, 0)
-        self.main_box.pack_start(self.button_box, False, False, 0)
+        self.main_box.pack_start(self.next_button, False, False, 0)
 
         self.add(self.main_box)
         self.show_all()
@@ -94,7 +87,8 @@ class ImageGallery(Gtk.Window):
     def getImages(self):
         self.image_folder = "/home/pi/Documents/MarcDigital/images"
         self.image_files = sorted([f for f in os.listdir(self.image_folder)])
-        self.on_home_button_clicked(None)  
+        self.current_image = 0
+        self.load_image()
     
     def _on_images_changed(self, monitor, file, other_file, event_tile):
         self.getImages()
@@ -104,7 +98,7 @@ class ImageGallery(Gtk.Window):
         geometry = monitor.get_geometry()
         scale_factor = monitor.get_scale_factor()
         self._width = scale_factor*geometry.width
-        self._height = scale_factor*geometry.height- 50 # to comodate space for buttons
+        self._height = scale_factor*geometry.height # to comodate space for buttons
 
     def connectRPIbuttons(self, leftPin, rightPin):
         # Set up the GPIO mode to use the BCM numbering
@@ -160,11 +154,7 @@ class ImageGallery(Gtk.Window):
 
     def on_next_button_clicked(self, button):
         self.reset_timer("imageRotation")
-        self.go_to_next_image()        
-
-    def on_home_button_clicked(self, button):
-        self.current_image = 0
-        self.load_image()
+        self.go_to_next_image()
 
     def addTimer(self, time, function, name):
         self.timer_id[name] = GLib.timeout_add(time, function)
