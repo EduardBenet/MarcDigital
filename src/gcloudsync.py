@@ -2,6 +2,8 @@ import os
 import pickle
 import requests
 import json
+import tempfile
+import shutil
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import google.auth
@@ -102,10 +104,19 @@ def sync_google_photos_album(album_id, download_directory, fullImage = True):
 
 def download_image(url, file_path):
     response = requests.get(url)
-    with open(file_path, 'wb') as file:
-        file.write(response.content)
+
+    expected_size = int(response.headers.get('Content-Length', 0))
+    actual_size = 0
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        for chunk in response.iter_content(1024):
+            temp_file.write(chunk)
+            actual_size += len(chunk)
+
+    # Maybe check if the download was ok
+    if actual_size == expected_size:
+        shutil.move(temp_file.name, file_path)
 
 if __name__ == '__main__':
     download_directory = '/home/pi/Documents/MarcDigital/images'
     os.makedirs(download_directory, exist_ok=True)
-    sync_google_photos_album('AF9Qav513ch3z47nnhS2d-REj_nXfAS7f3gErmU_62VUsZPgcHYe_x56yWE0AvNxO9kG_M7BmM8D', download_directory, fullImage = False)
+    sync_google_photos_album('AF9Qav513ch3z47nnhS2d-REj_nXfAS7f3gErmU_62VUsZPgcHYe_x56yWE0AvNxO9kG_M7BmM8D', download_directory, fullImage = True)
