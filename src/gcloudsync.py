@@ -1,9 +1,8 @@
-import os
-import pickle
-import requests
-import json
-import tempfile
-import shutil
+#!/bin/python
+
+import os, json, pickle, requests, shutil
+from tempfile import NamedTemporaryFile
+# Google Auth
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import google.auth
@@ -107,7 +106,7 @@ def download_image(url, file_path):
 
     expected_size = int(response.headers.get('Content-Length', 0))
     actual_size = 0
-    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+    with NamedTemporaryFile(delete=False) as temp_file:
         for chunk in response.iter_content(1024):
             temp_file.write(chunk)
             actual_size += len(chunk)
