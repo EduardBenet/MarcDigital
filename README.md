@@ -8,7 +8,7 @@ This project aims to create a digital frame for old people where the rest of the
 - Make the images rotate automatically
 
 ## Software requirements
-- This project was built and tested in Python 3.9.2, but at least the packaging and install works in 3.10-3.11
+- This project was built and tested in Python 3.9.2, but at least the packaging and install works in 3.10
 - You will have to install GTK. For debian, you can do:
 ```
 sudo apt install libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev gir1.2-gtk-4.0

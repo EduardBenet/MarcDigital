@@ -12,7 +12,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Gio
 
 # Time to rotate images in seconds
-IMAGE_TIMER = 3
+IMAGE_TIMER = 60
 # Google Photos Album ID
 ALBUM_ID = 'AF9Qav513ch3z47nnhS2d-REj_nXfAS7f3gErmU_62VUsZPgcHYe_x56yWE0AvNxO9kG_M7BmM8D'
 
@@ -21,8 +21,11 @@ SYNC_FREQ = 30*1000
 
 class ImageGallery(Gtk.Window):
 
-    def __init__(self):
+    def __init__(self, image_rot_freq = IMAGE_TIMER, sync_freq = SYNC_FREQ):
         super().__init__()
+
+        self.image_freq = image_rot_freq
+        self.sync_freq = sync_freq
 
         # Get the directory to store the images:
         self.image_folder = os.path.join(os.getcwd(), "images")
@@ -68,9 +71,9 @@ class ImageGallery(Gtk.Window):
         # Add timers
         self.timer_id = {}
         # Add timer to auto-rotate images      
-        self.addTimer(IMAGE_TIMER*1000, self.timerFunction, "imageRotation")    
+        self.addTimer(self.image_freq*1000, self.timerFunction, "imageRotation")    
         # Add timer to sync images
-        self.addTimer(SYNC_FREQ, self.syncFunction , "imageSync")        
+        self.addTimer(self.sync_freq, self.syncFunction , "imageSync")        
 
         # Images will be synched in folder images by a separate process, grab and sort them
         self.getImages()
@@ -176,7 +179,7 @@ class ImageGallery(Gtk.Window):
         # Remove the old timer
         GLib.source_remove(self.timer_id[name])
         # Add a new timer
-        self.addTimer(IMAGE_TIMER*1000, self.timerFunction, name)
+        self.addTimer(self.image_freq*1000, self.timerFunction, name)
 
     def syncFunction(self):
 
@@ -188,7 +191,7 @@ class ImageGallery(Gtk.Window):
         return True    
     
 def main():    
-    app = ImageGallery()
+    app = ImageGallery(image_rot_freq = 3)
     Gtk.main()
 
 if __name__=="__main__":
