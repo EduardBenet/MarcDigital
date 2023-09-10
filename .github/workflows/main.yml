@@ -15,7 +15,7 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v4
         with:
-          python-version: 3.9
+          python-version: ["3.9, 3.10, 3.11"]
 
     - name: Install dependencies
       run: |
@@ -28,7 +28,7 @@ jobs:
 
     - name: Upload Wheel as Artifact
       if: sucecss()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: wheel-file
         path: dist/*.whl
@@ -44,11 +44,11 @@ jobs:
     
     - name: Set up Python
       uses: actions/setup-python@v4
-      with:
-        python-version: 3.9
-    
+        with:
+          python-version: ["3.9, 3.10, 3.11"]
+          
     - name: Download Wheel Artifact
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v3
       with:
         name: wheel-file
         path: dist/
