@@ -13,13 +13,26 @@ This project aims to create a digital frame for old people where the rest of the
 ```
 sudo apt install libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev gir1.2-gtk-4.0
 ```
-But the [official GI site](https://pygobject.readthedocs.io/en/latest/getting_started.html) has information in other OS.
+But the [official GI site](https://pygobject.readthedocs.io/en/latest/getting_started.html) has information about other OS.
+
+Install the package from the releases:
+```
+pip install ./dist/MarcDigital-0.1-py3-none-any.whl
+```
 
 ## Getting started
-Because this is aimed to old people, the app needs to auto-star with the raspberry, and give no options to access any file. For this 
+To simply start the app you can do:
+```
+from MarcDigital import ImageGallery
+app = ImageGallery(image_rot_freq = 3)
+Gtk.main()
+```
+Because this is aimed to be completely automated, the app needs to auto-start with the raspberry, and give no options to access any file. 
+
+For this 
 ```
 mkdir -p /home/pi/.config/autostart
 cp marcdigital.desktop /home/pi/.config/autostart/marcdigital.desktop
 ```
 
-This will start the app. In this first iteration I am doing the synching of the pictures separately.
+This will start the app and start synching your images

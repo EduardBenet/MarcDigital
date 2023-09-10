@@ -21,12 +21,13 @@ SYNC_FREQ = 30*1000
 
 class ImageGallery(Gtk.Window):
 
-    def __init__(self, image_rot_freq = IMAGE_TIMER, sync_freq = SYNC_FREQ):
+    def __init__(self, album_id, image_rot_freq = IMAGE_TIMER, sync_freq = SYNC_FREQ):
         super().__init__()
 
+        self.album_id = album_id
         self.image_freq = image_rot_freq
         self.sync_freq = sync_freq
-
+        
         # Get the directory to store the images:
         self.image_folder = os.path.join(os.getcwd(), "images")
         os.makedirs(self.image_folder, exist_ok=True)
@@ -186,13 +187,13 @@ class ImageGallery(Gtk.Window):
         auth_client = gcloud_auth('gphotos_credentials.json', 'token.json')
         pm = PhotosManager(auth_client)
 
-        pm.sync_google_photos_album(ALBUM_ID, self.image_folder, fullImage = True)
+        pm.sync_google_photos_album(self.album_id, self.image_folder, fullImage = True)
 
         return True    
     
-def main():    
-    app = ImageGallery(image_rot_freq = 3)
+def start_image_gallery(*args, **kwargs):    
+    app = ImageGallery(*args, **kwargs)
     Gtk.main()
 
 if __name__=="__main__":
-    main()
+    start_image_gallery('AF9Qav513ch3z47nnhS2d-REj_nXfAS7f3gErmU_62VUsZPgcHYe_x56yWE0AvNxO9kG_M7BmM8D', image_rot_freq = 3)
