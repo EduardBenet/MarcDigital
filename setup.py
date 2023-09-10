@@ -1,3 +1,4 @@
+#!/bin/python
 from setuptools import setup, find_packages
 
 with open('requirements.txt') as f:
@@ -6,7 +7,7 @@ with open('requirements.txt') as f:
 setup(
     name='MarcDigital',
     version='0.1',
-    packages=find_packages(),
+    packages=find_packages(where="src"),
     install_requires=[
         required
     ],
