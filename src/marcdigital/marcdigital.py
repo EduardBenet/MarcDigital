@@ -3,7 +3,7 @@
 import os
 import gi
 import RPi.GPIO as GPIO
-from gcloudsync import gcloud_auth, PhotosManager
+from .gcloudsync import gcloud_auth, PhotosManager
 
 # Set up the GPIO mode to use the BCM numbering
 GPIO.setmode(GPIO.BCM)
@@ -13,8 +13,6 @@ from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Gio
 
 # Time to rotate images in seconds
 IMAGE_TIMER = 60
-# Google Photos Album ID
-ALBUM_ID = 'AF9Qav513ch3z47nnhS2d-REj_nXfAS7f3gErmU_62VUsZPgcHYe_x56yWE0AvNxO9kG_M7BmM8D'
 
 # SyncFrequency
 SYNC_FREQ = 30*1000
