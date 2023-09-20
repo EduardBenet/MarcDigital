@@ -10,7 +10,7 @@ from pathlib import Path
 # Google Auth
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-import google.auth
+import google.oauth2.credentials
 
 # OAuth endpoints given in the Google API documentation
 authorization_base_url = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -76,6 +76,7 @@ class gcloud_auth:
                 auto_refresh_kwargs = self.extra,
                 token_updater = self.save_token                
             )
+            
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
                 CLIENT_SECRET_FILE, 
@@ -106,11 +107,15 @@ class PhotosManager():
 
     def __init__(self, auth):
         auth.authorize()
-        self.photos_service = self.get_google_photos_service(auth.session.access_token)
+        self.photos_service = self.get_google_photos_service(auth)
 
-    def get_google_photos_service(self, access_token):
+    def get_google_photos_service(self, auth):
 
-        credentials = google.oauth2.credentials.Credentials(access_token)
+        credentials = google.oauth2.credentials.Credentials(auth.session.access_token,
+                                                            refresh_token = auth.session.token['refresh_token'], 
+                                                            token_uri = auth.token_uri,
+                                                            client_id = auth.client_id, 
+                                                            client_secret = auth.client_secret)
 
         return build('photoslibrary', 'v1', credentials=credentials, static_discovery=False)
 
