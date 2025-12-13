@@ -1,0 +1,14 @@
+[package]
+name = "MarcDigital"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.100"
+azure_core = "0.30.1"
+azure_identity = "0.30.0"
+azure_storage_blob = "0.7.0"
+futures = "0.3.31"
+sdl2 = { version = "0.38.0", features = ["image"] }
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
+url = "2.5.7"

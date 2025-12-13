@@ -1,0 +1,16 @@
+version: "2.1"
+services:
+  digital_frame:
+    build: .
+    restart: always
+    privileged: true # needed for SDL2 fullscreen graphics on Pi
+    environment:
+      - AZURE_STORAGE_ACCOUNT=benetmilian
+      - AZURE_STORAGE_KEY=sp=rl&st=2025-12-08T20:55:51Z&se=2025-12-09T05:10:51Z&spr=https&sv=2024-11-04&sr=c&sig=GvfKQvawlrIRT47XjpMDP%2BHr2HMqUXkEJYy0rKp6Tgs%3D
+      - CONTAINER_NAME=padrina
+    volumes:
+      - synced_photos:/digital_frame/synced_photos
+    network_mode: "host" # ensures SDL2 can access display if needed
+
+volumes:
+  synced_photos:
