@@ -14,6 +14,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Locally synced photos
+/synced_photos/
+
 # Added by cargo
 
 /target

@@ -1,38 +1,43 @@
 # MarcDigital
-This project aims to create a digital frame for old people where the rest of the family can easily push photos.
 
-## Functional Requirements
-- Synch with a Google Fotos album. One for now, maybe more in the future.
-- Have two buttons, one to move to the previous image, one to move to the following image. 
-- A future button might be added to change the album
-- Make the images rotate automatically
+A digital photo frame for older family members: relatives push photos to the cloud, the
+frame syncs them locally and shows a rotating fullscreen slideshow. Runs on a Raspberry Pi,
+fully automated. Written entirely in **Rust**.
 
-## Software requirements
-- This project was built and tested in Python 3.9.2, but at least the packaging and install works in 3.10
-- You will have to install GTK. For debian, you can do:
-```
-sudo apt install libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev gir1.2-gtk-4.0
-```
-But the [official GI site](https://pygobject.readthedocs.io/en/latest/getting_started.html) has information about other OS.
+> **See [`REQUIREMENTS.md`](./REQUIREMENTS.md) for the authoritative project spec** —
+> requirements, target hardware, status, and known gaps.
 
-Install the package from the releases:
-```
-pip install ./dist/MarcDigital-0.1-py3-none-any.whl
-```
+## Stack
+- **Rust** + **SDL2** for the fullscreen slideshow (`src/main.rs`)
+- **Azure Blob Storage** for the photo master copy, synced locally (`src/fetcher.rs`)
+- **tokio** async runtime
+- **Balena** for deployment / fleet updates
 
-## Getting started
-To simply start the app you can do:
-```
-from MarcDigital import ImageGallery
-app = ImageGallery(image_rot_freq = 3)
-Gtk.main()
-```
-Because this is aimed to be completely automated, the app needs to auto-start with the raspberry, and give no options to access any file. 
+## Configuration
+All secrets come from environment variables (see `docker-compose.yaml`):
 
-For this 
+| Variable | Meaning |
+|---|---|
+| `AZURE_STORAGE_ACCOUNT` | Azure storage account name |
+| `AZURE_STORAGE_KEY` | SAS token / key (do **not** commit) |
+| `CONTAINER_NAME` | Blob container holding the photos |
+
+Photos are synced into `./synced_photos` with a `manifest.txt` tracking local state.
+
+## Build & run
+Local build:
 ```
-mkdir -p /home/pi/.config/autostart
-cp marcdigital.desktop /home/pi/.config/autostart/marcdigital.desktop
+cargo build --release
 ```
 
-This will start the app and start synching your images
+Cross-compile for the Pi (armv6) and run via Balena/compose:
+```
+docker compose up --build
+```
+
+## Status
+Slideshow and Azure sync work. Not yet implemented: first-boot Wi-Fi onboarding screen,
+prev/next navigation buttons, periodic re-sync. See `REQUIREMENTS.md`.
+
+## License
+MIT — see `LICENSE.md`.
