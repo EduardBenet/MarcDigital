@@ -1,22 +1,23 @@
-# Ignore saved tokens
+# Local secrets
+.env
+
+# Legacy Google-auth credential files (from the pre-Rust Python tree).
+# Deliberately NOT a blanket `*.json`: that would silently swallow legitimate
+# config such as the companion app's staticwebapp.config.json / package.json.
+credentials.json
+token.json
+client_secret*.json
 *.pickle
 
-# Ignore credentials
-*.json
+# Locally synced photos
+/synced_photos/
 
 # Any image
 *.png
 *.jpg
 
-# Python byte-compiled files
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Locally synced photos
-/synced_photos/
+# Editor / tooling
+.claude/settings.local.json
 
 # Added by cargo
-
 /target

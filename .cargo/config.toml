@@ -1,8 +1,0 @@
-[target.arm-unknown-linux-gnueabihf]
-linker = "/rpi_tools/arm-bcm2708/arm-linux-gnueabihf/bin/arm-linux-gnueabihf-gcc"
-rustflags = [
-    "-C", "target-cpu=arm1176jzf-s",
-    "-C", "target-feature=+vfp2",
-    "-C", "link-arg=-static",      
-    "-L", "/usr/lib/arm-linux-gnueabihf"
-]

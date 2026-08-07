@@ -4,10 +4,22 @@ services:
     build: .
     restart: always
     privileged: true # needed for SDL2 fullscreen graphics on Pi
+    # No secrets in this file, and deliberately not even declared here.
+    # The five AZURE_*/CONTAINER_NAME values are balena fleet (or device)
+    # service variables — balena injects those into the container on its own.
+    # Declaring them as valueless pass-throughs would resolve to empty strings
+    # on the builder and shadow the dashboard values.
+    # For local dev: `docker run --env-file .env`, or `cargo run` with .env loaded.
     environment:
-      - AZURE_STORAGE_ACCOUNT=benetmilian
-      - AZURE_STORAGE_KEY=sp=r&st=2025-12-13T15:26:48Z&se=2025-12-13T23:41:48Z&spr=https&sv=2024-11-04&sr=c&sig=jOveNHc1zPsDGl7uJA2Qn4Gz7OOVkYKXeXZ6PHrxhZQ%3D
-      - CONTAINER_NAME=padrina
+      # SDL renders straight to the KMS/DRM display — there is no X11 or Wayland
+      # session on the frame.
+      - SDL_VIDEODRIVER=kmsdrm
+    labels:
+      # Re-triggers container start when display/input devices appear, so the
+      # frame recovers if it boots before the HDMI device is enumerated.
+      io.balena.features.dbus: "1"
+    devices:
+      - /dev/dri:/dev/dri # GPU / KMS nodes for the fullscreen slideshow
     volumes:
       - synced_photos:/digital_frame/synced_photos
     network_mode: "host" # ensures SDL2 can access display if needed

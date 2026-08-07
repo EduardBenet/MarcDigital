@@ -4,7 +4,7 @@ on: [push]
 
 jobs:
   build:
-    name: Rust build & check
+    name: Rust build, lint & test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -24,8 +24,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+      # `--workspace` matters: the root package is the default member, so
+      # without it `core` (where all the tests live) is never checked.
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --workspace --release

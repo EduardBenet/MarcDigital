@@ -1,0 +1,15 @@
+# Keep the build context small and secret-free. Nothing here is needed by the
+# Dockerfile, which copies only Cargo.toml/Cargo.lock, core/ and src/.
+.git
+target
+synced_photos
+
+# Local secrets must never enter a build context.
+.env
+
+# Docs / CI / editor cruft
+.github
+.claude
+*.md
+!README.md
+docker-compose.yaml
