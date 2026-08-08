@@ -236,10 +236,38 @@ fn init_video(sdl: &sdl2::Sdl) -> Result<sdl2::VideoSubsystem, String> {
         }
     }
 
+    // ASCII only: the balena log pipeline mangles non-ASCII punctuation.
     Err(format!(
-        "no usable video driver. Tried — {}",
+        "no usable video driver. Tried: {}",
         errors.join("; ")
     ))
+}
+
+/// How long to wait before re-attempting a failed video init.
+const VIDEO_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Bring up video, waiting for the display rather than giving up on it.
+///
+/// Exiting here would be wrong twice over: under `restart: always` it becomes a
+/// crash loop that also destroys the container you need a shell in to debug,
+/// and in the field a frame whose TV is simply switched off at boot would never
+/// recover. Retrying costs nothing and self-heals when the display appears.
+fn wait_for_video(sdl: &sdl2::Sdl) -> sdl2::VideoSubsystem {
+    let mut attempt: u32 = 0;
+    loop {
+        match init_video(sdl) {
+            Ok(video) => return video,
+            Err(e) => {
+                attempt += 1;
+                eprintln!(
+                    "No display yet (attempt {attempt}): {e}. \
+                     Retrying in {}s; the frame stays running.",
+                    VIDEO_RETRY_INTERVAL.as_secs()
+                );
+                std::thread::sleep(VIDEO_RETRY_INTERVAL);
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -266,7 +294,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let sdl_context = sdl2::init()?;
     log_display_environment();
-    let video = init_video(&sdl_context)?;
+    let video = wait_for_video(&sdl_context);
 
     let window = video.window("Slideshow", 1920, 1080).fullscreen().build()?;
 

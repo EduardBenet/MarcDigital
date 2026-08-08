@@ -28,10 +28,21 @@ RUN cargo build --release --locked
 # Runtime: balena's Debian bookworm base, same glibc as the builder image.
 FROM balenalib/raspberrypi4-64-debian:bookworm-run
 
-# Shared libs only — SDL2 is linked dynamically (REQUIREMENTS.md §8).
+# Shared libs only - SDL2 is linked dynamically (REQUIREMENTS.md §8).
+#
+# libgl1-mesa-dri is NOT optional despite the slideshow rendering in software:
+# SDL2's KMSDRM backend creates its surface through GBM + EGL, and Mesa's EGL
+# needs a DRI driver (vc4_dri.so on a Pi, swrast_dri.so as fallback). Without
+# it Mesa walks vc4 -> zink -> kms_swrast -> swrast, finds nothing, and SDL
+# dies with the misleading "EGL not initialized" while the display itself is
+# perfectly fine. libgbm1/libegl1 come with SDL2 but are named explicitly so a
+# future base-image change cannot silently drop them.
 RUN install_packages \
     libsdl2-2.0-0 \
     libsdl2-image-2.0-0 \
+    libgl1-mesa-dri \
+    libegl1 \
+    libgbm1 \
     libssl3 \
     ca-certificates
 
