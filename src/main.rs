@@ -246,17 +246,60 @@ fn init_video(sdl: &sdl2::Sdl) -> Result<sdl2::VideoSubsystem, String> {
 /// How long to wait before re-attempting a failed video init.
 const VIDEO_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Bring up video, waiting for the display rather than giving up on it.
+/// Open the display: video subsystem, fullscreen window, and canvas.
 ///
-/// Exiting here would be wrong twice over: under `restart: always` it becomes a
+/// Every step here can fail on a frame whose panel is not ready, so they are
+/// kept together and retried as one unit. Splitting them means a later step
+/// escaping the retry, which is exactly how an "EGL not initialized" at window
+/// creation took the whole container down.
+///
+/// The window deliberately adopts the panel's *current* mode rather than
+/// requesting a size: under KMSDRM a fixed request is a real modeset, and an
+/// 800x480 panel simply has no 1920x1080 mode to switch to.
+fn open_display(
+    sdl: &sdl2::Sdl,
+) -> Result<(sdl2::VideoSubsystem, sdl2::render::WindowCanvas), String> {
+    let video = init_video(sdl)?;
+
+    let (w, h) = match video.display_bounds(0) {
+        Ok(bounds) => {
+            println!("Display 0 reports {}x{}", bounds.width(), bounds.height());
+            (bounds.width(), bounds.height())
+        }
+        Err(e) => {
+            // Not fatal: fullscreen_desktop ignores the requested size anyway,
+            // so any plausible value gets us to a window.
+            eprintln!("Could not query display bounds ({e}); falling back to 1280x720");
+            (1280, 720)
+        }
+    };
+
+    let window = video
+        .window("Slideshow", w, h)
+        .fullscreen_desktop()
+        .build()
+        .map_err(|e| format!("creating window: {e}"))?;
+
+    let canvas = window
+        .into_canvas()
+        .software()
+        .build()
+        .map_err(|e| format!("creating canvas: {e}"))?;
+
+    Ok((video, canvas))
+}
+
+/// Wait for the display, rather than giving up on it.
+///
+/// Exiting would be wrong twice over: under `restart: always` it becomes a
 /// crash loop that also destroys the container you need a shell in to debug,
 /// and in the field a frame whose TV is simply switched off at boot would never
 /// recover. Retrying costs nothing and self-heals when the display appears.
-fn wait_for_video(sdl: &sdl2::Sdl) -> sdl2::VideoSubsystem {
+fn wait_for_display(sdl: &sdl2::Sdl) -> (sdl2::VideoSubsystem, sdl2::render::WindowCanvas) {
     let mut attempt: u32 = 0;
     loop {
-        match init_video(sdl) {
-            Ok(video) => return video,
+        match open_display(sdl) {
+            Ok(display) => return display,
             Err(e) => {
                 attempt += 1;
                 eprintln!(
@@ -294,11 +337,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let sdl_context = sdl2::init()?;
     log_display_environment();
-    let video = wait_for_video(&sdl_context);
-
-    let window = video.window("Slideshow", 1920, 1080).fullscreen().build()?;
-
-    let mut canvas = window.into_canvas().software().build()?;
+    // Held for the lifetime of the program: dropping the video subsystem would
+    // tear down the window it created.
+    let (_video, mut canvas) = wait_for_display(&sdl_context);
     let texture_creator = canvas.texture_creator();
 
     // Decode target: the panel's own resolution, so textures are never larger

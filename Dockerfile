@@ -37,12 +37,18 @@ FROM balenalib/raspberrypi4-64-debian:bookworm-run
 # dies with the misleading "EGL not initialized" while the display itself is
 # perfectly fine. libgbm1/libegl1 come with SDL2 but are named explicitly so a
 # future base-image change cannot silently drop them.
+# libegl1 is only the GLVND *loader*; libegl-mesa0 is the implementation behind
+# it, and SDL loads libGLESv2.so.2 (libgles2) for the KMSDRM context. Installing
+# the loader without those gives "EGL not initialized" with no other clue.
 RUN install_packages \
     libsdl2-2.0-0 \
     libsdl2-image-2.0-0 \
     libgl1-mesa-dri \
     libegl1 \
+    libegl-mesa0 \
+    libgles2 \
     libgbm1 \
+    libdrm2 \
     libssl3 \
     ca-certificates
 
