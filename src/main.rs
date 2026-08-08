@@ -157,6 +157,91 @@ fn draw_waiting_screen(canvas: &mut sdl2::render::WindowCanvas) -> Result<(), St
     Ok(())
 }
 
+/// Report what the container can actually see of the display hardware.
+///
+/// The frame is headless and unattended, so when the display fails to come up
+/// the device log is the only evidence available. Printing this unconditionally
+/// costs nothing at boot and turns "kmsdrm not available" from a dead end into
+/// something diagnosable without another push.
+fn log_display_environment() {
+    match std::fs::read_dir("/dev/dri") {
+        Ok(entries) => {
+            let mut nodes: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            nodes.sort();
+            if nodes.is_empty() {
+                println!("/dev/dri exists but is empty (no card/render nodes in this container)");
+            } else {
+                println!("/dev/dri contains: {}", nodes.join(", "));
+            }
+        }
+        Err(e) => println!("/dev/dri not visible from this container: {e}"),
+    }
+
+    // SDL's KMSDRM backend opens a VT to take over the console; without one it
+    // can fail even when the DRM nodes are present.
+    let ttys: Vec<&str> = ["/dev/tty0", "/dev/tty", "/dev/console"]
+        .into_iter()
+        .filter(|p| Path::new(p).exists())
+        .collect();
+    println!(
+        "console devices: {}",
+        if ttys.is_empty() {
+            "none visible".to_string()
+        } else {
+            ttys.join(", ")
+        }
+    );
+
+    println!(
+        "SDL video drivers compiled in: {}",
+        sdl2::video::drivers().collect::<Vec<_>>().join(", ")
+    );
+}
+
+/// Bring up the video subsystem, trying each candidate driver in turn.
+///
+/// A frame that exits because one backend was unavailable just crash-loops
+/// under `restart: always`, so we fall back rather than give up: whichever
+/// driver works, the slideshow runs. `SDL_VIDEODRIVER` (set in the compose
+/// file) is honoured first when present, then the sensible defaults for a Pi.
+fn init_video(sdl: &sdl2::Sdl) -> Result<sdl2::VideoSubsystem, String> {
+    let mut candidates: Vec<String> = Vec::new();
+    if let Ok(preferred) = std::env::var("SDL_VIDEODRIVER") {
+        if !preferred.trim().is_empty() {
+            candidates.push(preferred.trim().to_string());
+        }
+    }
+    for fallback in ["kmsdrm", "x11", "wayland"] {
+        if !candidates.iter().any(|c| c == fallback) {
+            candidates.push(fallback.to_string());
+        }
+    }
+
+    let mut errors = Vec::new();
+    for driver in &candidates {
+        // SDL reads this at subsystem-init time, so it must be set per attempt.
+        std::env::set_var("SDL_VIDEODRIVER", driver);
+        match sdl.video() {
+            Ok(video) => {
+                println!("Video driver in use: {driver}");
+                return Ok(video);
+            }
+            Err(e) => {
+                eprintln!("Video driver {driver} unavailable: {e}");
+                errors.push(format!("{driver}: {e}"));
+            }
+        }
+    }
+
+    Err(format!(
+        "no usable video driver. Tried — {}",
+        errors.join("; ")
+    ))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::from_env()?;
@@ -180,7 +265,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let sdl_context = sdl2::init()?;
-    let video = sdl_context.video()?;
+    log_display_environment();
+    let video = init_video(&sdl_context)?;
 
     let window = video.window("Slideshow", 1920, 1080).fullscreen().build()?;
 
