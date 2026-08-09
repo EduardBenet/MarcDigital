@@ -261,11 +261,27 @@ fn open_display(
 ) -> Result<(sdl2::VideoSubsystem, sdl2::render::WindowCanvas), String> {
     let video = init_video(sdl)?;
 
-    let (w, h) = match video.display_bounds(0) {
-        Ok(bounds) => {
-            println!("Display 0 reports {}x{}", bounds.width(), bounds.height());
-            (bounds.width(), bounds.height())
+    // Enumerate every display SDL sees. On a Pi the DSI panel and two HDMI
+    // connectors can all be candidates, and picking the wrong index yields a
+    // window that renders correctly to a screen nobody is looking at.
+    match video.num_video_displays() {
+        Ok(n) => {
+            println!("SDL reports {n} display(s)");
+            for i in 0..n {
+                let name = video
+                    .display_name(i)
+                    .unwrap_or_else(|_| "<unnamed>".to_string());
+                match video.display_bounds(i) {
+                    Ok(b) => println!("  display {i}: {name} {}x{}", b.width(), b.height()),
+                    Err(e) => println!("  display {i}: {name} (bounds unavailable: {e})"),
+                }
+            }
         }
+        Err(e) => eprintln!("Could not enumerate displays: {e}"),
+    }
+
+    let (w, h) = match video.display_bounds(0) {
+        Ok(bounds) => (bounds.width(), bounds.height()),
         Err(e) => {
             // Not fatal: fullscreen_desktop ignores the requested size anyway,
             // so any plausible value gets us to a window.
@@ -280,11 +296,24 @@ fn open_display(
         .build()
         .map_err(|e| format!("creating window: {e}"))?;
 
+    // No `.software()`: under KMSDRM the supported path to scanout is the
+    // GLES2/EGL one, and a software renderer can draw a perfectly correct frame
+    // that never reaches the panel. Passing no flags lets SDL walk its render
+    // drivers and take the first that works, so it still degrades to software
+    // if acceleration is genuinely unavailable.
     let canvas = window
         .into_canvas()
-        .software()
         .build()
         .map_err(|e| format!("creating canvas: {e}"))?;
+
+    println!(
+        "Renderer in use: {} (accelerated: {})",
+        canvas.info().name,
+        canvas
+            .info()
+            .flags
+            .contains(sdl2::render::RendererFlags::ACCELERATED)
+    );
 
     Ok((video, canvas))
 }
