@@ -1,71 +1,41 @@
 name: Marc Digital
 
-on: [push]
+on:
+  push:
+  pull_request:
+  # Callable so the release workflow can gate a balena deploy on these exact
+  # checks, instead of duplicating them and letting the two drift apart.
+  workflow_call:
 
 jobs:
-
-  package:
-    name: Python Packaging
+  build:
+    name: Rust build, lint & test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.9", "3.10"]
-
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Install SDL2 dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-image-dev
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install setuptools wheel
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
-    - name: Build Wheel
-      run: |
-        python setup.py sdist bdist_wheel
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
-    - name: Upload Wheel as Artifact
-      if: success()
-      uses: actions/upload-artifact@v3
-      with:
-        name: wheel-file
-        path: dist/*.whl
-        retention-days: 7
-  
-  install:
-    name: Wheel Installation Test
-    needs: package
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.9", "3.10"]
-    
-    steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-      
-    - name: Add libraries
-      run: |
-        sudo apt install libgirepository1.0-dev gir1.2-gtk-4.0
+      - name: Check formatting
+        run: cargo fmt --check
 
-    - name: Download Wheel Artifact
-      uses: actions/download-artifact@v3
-      with:
-        name: wheel-file
-        path: dist/
+      # `--workspace` matters: the root package is the default member, so
+      # without it `core` (where all the tests live) is never checked.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-    - name: Install Wheel
-      run: |
-        pip install dist/*.whl
-    
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build
+        run: cargo build --workspace --release
