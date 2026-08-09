@@ -38,8 +38,6 @@ jobs:
     name: Build and deploy on balena
     needs: verify
     runs-on: ubuntu-latest
-    # Without the token the job can only fail confusingly, so skip it instead.
-    if: ${{ github.repository_owner != '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,15 +50,21 @@ jobs:
       - name: Install balena CLI
         run: npm install -g balena-cli
 
-      - name: Verify credentials are present
+      # An explicit login is required. The CLI does NOT read a plain
+      # `BALENA_TOKEN` environment variable - only its own `BALENARC_`-prefixed
+      # names - so relying on the env alone fails with "Login required" even
+      # though the secret is present. `balena login --token` is unambiguous, and
+      # the credential it writes to ~/.balena persists for later steps.
+      - name: Log in to balena
         env:
           BALENA_TOKEN: ${{ secrets.BALENA_TOKEN }}
         run: |
           if [ -z "$BALENA_TOKEN" ]; then
-            echo "::error::BALENA_TOKEN secret is not set. Add it under Settings > Secrets and variables > Actions."
+            echo "::error::BALENA_TOKEN secret is not set. Add it under Settings > Secrets and variables > Actions (balenaCloud > Preferences > Access tokens)."
             exit 1
           fi
-          balena whoami
+          balena login --token "$BALENA_TOKEN"
+          echo "Authenticated as: $(balena whoami)"
 
       # balena builds the arm64 image on its own native builders, so there is no
       # cross-compile or QEMU step here - we only hand it the source.
@@ -70,7 +74,6 @@ jobs:
       # manual runs default to draft so you can rehearse safely.
       - name: Push release to balena
         env:
-          BALENA_TOKEN: ${{ secrets.BALENA_TOKEN }}
           BALENA_FLEET: ${{ vars.BALENA_FLEET || 'g_eduard_benet/digiframe' }}
           VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
         run: |
