@@ -1,0 +1,39 @@
+version: 2
+
+# Keeps action and crate versions current without hand-pinning them. The
+# alternative is what this repo already drifted into: actions/checkout on one
+# major version sitting next to actions/setup-node on another, with no signal
+# that either is stale until something breaks.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    # Actions move together often enough that one PR a week beats five.
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      # Patch and minor bumps are the routine ones and are safe to batch; a
+      # major bump gets its own PR so it is actually read before merging.
+      cargo-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # SDL2 majors need the C library on the device to match, which is pinned
+      # by the Debian base image - so a major bump here is a deliberate,
+      # coordinated change, not something to merge from a bot PR.
+      - dependency-name: "sdl2"
+        update-types: ["version-update:semver-major"]

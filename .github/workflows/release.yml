@@ -38,6 +38,10 @@ jobs:
     name: Build and deploy on balena
     needs: verify
     runs-on: ubuntu-latest
+    # Overrides the read-only default above: creating a GitHub Release writes
+    # to the repository.
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -90,6 +94,31 @@ jobs:
             --source . \
             $DRAFT \
             --release-tag version "$VERSION" commit "${{ github.sha }}"
+
+      # A balena release is not a GitHub Release. Without this the Releases page
+      # stays empty however many tags exist, and there is no readable record of
+      # what changed between versions. Runs only for real tags, and only after
+      # the balena push succeeded - a GitHub Release announcing a deploy that
+      # never happened would be worse than none.
+      #
+      # Uses the built-in `gh` CLI and `github.token`; no third-party action and
+      # no extra secret.
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists; leaving it untouched."
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              --verify-tag
+            echo "Created GitHub Release $TAG."
+          fi
 
       - name: Summary
         if: always()
