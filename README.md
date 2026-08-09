@@ -1,5 +1,8 @@
 # MarcDigital
 
+[![CI](https://github.com/EduardBenet/MarcDigital/actions/workflows/main.yml/badge.svg?branch=rust)](https://github.com/EduardBenet/MarcDigital/actions/workflows/main.yml)
+[![Release](https://github.com/EduardBenet/MarcDigital/actions/workflows/release.yml/badge.svg)](https://github.com/EduardBenet/MarcDigital/actions/workflows/release.yml)
+
 A digital photo frame for older family members: relatives push photos to the cloud, the
 frame syncs them locally and shows a rotating fullscreen slideshow. Runs on a Raspberry Pi,
 fully automated. Written entirely in **Rust**.
