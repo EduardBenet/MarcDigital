@@ -24,6 +24,9 @@ pub mod fake {
     #[derive(Default)]
     pub struct FakeStore {
         pub blobs: Mutex<HashMap<String, Vec<u8>>>,
+        /// Names reported by `list` that have no bytes behind them, so
+        /// `download` fails. Models a transient per-blob error.
+        pub extra_listed: Mutex<BTreeSet<String>>,
     }
 
     impl FakeStore {
@@ -35,6 +38,7 @@ pub mod fake {
                         .map(|(name, bytes)| (name.to_string(), bytes.to_vec()))
                         .collect(),
                 ),
+                extra_listed: Mutex::new(BTreeSet::new()),
             }
         }
     }
@@ -42,7 +46,9 @@ pub mod fake {
     #[async_trait]
     impl PhotoStore for FakeStore {
         async fn list(&self) -> Result<BTreeSet<String>> {
-            Ok(self.blobs.lock().unwrap().keys().cloned().collect())
+            let mut names: BTreeSet<String> = self.blobs.lock().unwrap().keys().cloned().collect();
+            names.extend(self.extra_listed.lock().unwrap().iter().cloned());
+            Ok(names)
         }
 
         async fn download(&self, name: &str) -> Result<Vec<u8>> {

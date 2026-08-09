@@ -6,9 +6,11 @@
 //! contents change underneath it, and a display that must stay responsive to a
 //! quit request.
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
 
 extern crate sdl2;
 
@@ -26,6 +28,36 @@ use marcdigital_core::sync::run_sync;
 
 mod store;
 use store::AzureBlobStore;
+
+/// Whether to emit verbose diagnostics.
+///
+/// The frame runs unattended for months, so anything logged per rotation would
+/// swamp the device log (a 30s rotation is ~2900 lines/day). Everything needed
+/// to debug the display path is therefore off by default and re-enabled with
+/// the `MARCDIGITAL_VERBOSE` service variable. Warnings and errors are never
+/// gated - only the routine narration is.
+fn verbose() -> bool {
+    static VERBOSE: OnceLock<bool> = OnceLock::new();
+    *VERBOSE.get_or_init(|| {
+        std::env::var("MARCDIGITAL_VERBOSE")
+            .map(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// `println!` that only fires under [`verbose`].
+macro_rules! vlog {
+    ($($arg:tt)*) => {
+        if verbose() {
+            println!($($arg)*);
+        }
+    };
+}
 
 /// How often the loop wakes to poll events. Short enough that a quit is acted
 /// on immediately, long enough that the frame stays near-idle between redraws.
@@ -47,15 +79,34 @@ fn is_image(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Files that failed to decode, with the modification time they had when they
+/// failed. Keeping the timestamp means a file *replaced* under the same name
+/// gets a fresh chance, while an unchanged bad file stays skipped.
+type SkipList = HashMap<PathBuf, Option<SystemTime>>;
+
+fn mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
 /// Candidate image files, sorted so rotation order is stable across restarts
 /// and re-scans. A folder we cannot read is logged and treated as empty — that
 /// is a degraded state to display, not a reason to exit.
-fn list_photos(dir: &Path) -> Vec<PathBuf> {
+///
+/// Entries in `skip` are filtered out here rather than after loading. Doing it
+/// later meant the rescan kept resurrecting a known-bad file: the in-memory
+/// list had dropped it, the on-disk listing had not, so the two never matched
+/// and the frame re-decoded and re-logged the same failure every 10 seconds.
+fn list_photos(dir: &Path, skip: &SkipList) -> Vec<PathBuf> {
     let mut photos: Vec<PathBuf> = match std::fs::read_dir(dir) {
         Ok(entries) => entries
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
             .filter(|path| path.is_file() && is_image(path))
+            .filter(|path| match skip.get(path) {
+                // Still the same bytes that failed before: leave it out.
+                Some(failed_at) => *failed_at != mtime(path),
+                None => true,
+            })
             .collect(),
         Err(e) => {
             eprintln!("Could not read {}: {e}", dir.display());
@@ -106,13 +157,14 @@ fn load_scaled_texture<'a>(
 
 /// Load the photo at `index`, skipping past any file that fails to decode.
 ///
-/// A corrupt or truncated image is dropped from `photos` and logged, so the
-/// frame moves on instead of dying. Returns `None` only when nothing in the
-/// list could be decoded at all.
+/// A corrupt or truncated image is dropped from `photos`, recorded in `skip`
+/// and logged once, so the frame moves on instead of dying. Returns `None` only
+/// when nothing in the list could be decoded at all.
 fn load_current<'a>(
     creator: &'a TextureCreator<WindowContext>,
     photos: &mut Vec<PathBuf>,
     index: &mut usize,
+    skip: &mut SkipList,
     max_w: u32,
     max_h: u32,
 ) -> Option<Texture<'a>> {
@@ -125,9 +177,11 @@ fn load_current<'a>(
             Err(e) => {
                 // Skipping is deliberate: one bad file must not take the frame
                 // down. It stays on disk (the next sync owns deleting it) but
-                // is removed from the rotation for this run.
-                eprintln!("Skipping {}: {e}", photos[*index].display());
-                photos.remove(*index);
+                // is remembered so later rescans do not retry it forever.
+                let bad = photos.remove(*index);
+                eprintln!("Skipping {}: {e}", bad.display());
+                let stamp = mtime(&bad);
+                skip.insert(bad, stamp);
             }
         }
     }
@@ -174,9 +228,10 @@ fn log_display_environment() {
             if nodes.is_empty() {
                 println!("/dev/dri exists but is empty (no card/render nodes in this container)");
             } else {
-                println!("/dev/dri contains: {}", nodes.join(", "));
+                vlog!("/dev/dri contains: {}", nodes.join(", "));
             }
         }
+        // Not gated: no DRM nodes means the display can never work.
         Err(e) => println!("/dev/dri not visible from this container: {e}"),
     }
 
@@ -186,7 +241,7 @@ fn log_display_environment() {
         .into_iter()
         .filter(|p| Path::new(p).exists())
         .collect();
-    println!(
+    vlog!(
         "console devices: {}",
         if ttys.is_empty() {
             "none visible".to_string()
@@ -195,7 +250,7 @@ fn log_display_environment() {
         }
     );
 
-    println!(
+    vlog!(
         "SDL video drivers compiled in: {}",
         sdl2::video::drivers().collect::<Vec<_>>().join(", ")
     );
@@ -259,14 +314,14 @@ const VIDEO_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 /// override this from the environment.
 fn preferred_render_driver() -> Option<u32> {
     if std::env::var("SDL_RENDER_DRIVER").is_ok_and(|v| !v.trim().is_empty()) {
-        println!("SDL_RENDER_DRIVER is set; leaving the choice to SDL.");
+        vlog!("SDL_RENDER_DRIVER is set; leaving the choice to SDL.");
         return None;
     }
 
     let drivers: Vec<String> = sdl2::render::drivers()
         .map(|d| d.name.to_string())
         .collect();
-    println!("Render drivers available: {}", drivers.join(", "));
+    vlog!("Render drivers available: {}", drivers.join(", "));
 
     match drivers.iter().position(|name| name == "opengles2") {
         Some(index) => Some(index as u32),
@@ -275,6 +330,31 @@ fn preferred_render_driver() -> Option<u32> {
             None
         }
     }
+}
+
+/// Build the fullscreen window and its canvas.
+///
+/// `driver_index` selects a specific SDL render driver; `None` means index -1,
+/// where SDL walks its whole driver list and settles on the first that works.
+/// The window is created here rather than passed in because `into_canvas`
+/// consumes it, so a failed canvas build needs a fresh window to retry with.
+fn build_canvas(
+    video: &sdl2::VideoSubsystem,
+    w: u32,
+    h: u32,
+    driver_index: Option<u32>,
+) -> Result<sdl2::render::WindowCanvas, String> {
+    let window = video
+        .window("Slideshow", w, h)
+        .fullscreen_desktop()
+        .build()
+        .map_err(|e| format!("creating window: {e}"))?;
+
+    let mut builder = window.into_canvas();
+    if let Some(index) = driver_index {
+        builder = builder.index(index);
+    }
+    builder.build().map_err(|e| format!("creating canvas: {e}"))
 }
 
 /// Open the display: video subsystem, fullscreen window, and canvas.
@@ -297,14 +377,14 @@ fn open_display(
     // window that renders correctly to a screen nobody is looking at.
     match video.num_video_displays() {
         Ok(n) => {
-            println!("SDL reports {n} display(s)");
+            vlog!("SDL reports {n} display(s)");
             for i in 0..n {
                 let name = video
                     .display_name(i)
                     .unwrap_or_else(|_| "<unnamed>".to_string());
                 match video.display_bounds(i) {
-                    Ok(b) => println!("  display {i}: {name} {}x{}", b.width(), b.height()),
-                    Err(e) => println!("  display {i}: {name} (bounds unavailable: {e})"),
+                    Ok(b) => vlog!("  display {i}: {name} {}x{}", b.width(), b.height()),
+                    Err(e) => vlog!("  display {i}: {name} (bounds unavailable: {e})"),
                 }
             }
         }
@@ -321,19 +401,20 @@ fn open_display(
         }
     };
 
-    let window = video
-        .window("Slideshow", w, h)
-        .fullscreen_desktop()
-        .build()
-        .map_err(|e| format!("creating window: {e}"))?;
-
-    let mut builder = window.into_canvas();
-    if let Some(index) = preferred_render_driver() {
-        builder = builder.index(index);
-    }
-    let canvas = builder
-        .build()
-        .map_err(|e| format!("creating canvas: {e}"))?;
+    // Prefer GLES2, but never let that preference become a hard requirement:
+    // asking SDL for one specific driver disables its own fallback chain, so a
+    // device where opengles2 is compiled in yet fails to create a context would
+    // otherwise retry forever instead of settling for a driver that works.
+    let canvas = match preferred_render_driver() {
+        Some(index) => match build_canvas(&video, w, h, Some(index)) {
+            Ok(canvas) => canvas,
+            Err(e) => {
+                eprintln!("Preferred renderer (opengles2) failed: {e}. Letting SDL choose.");
+                build_canvas(&video, w, h, None)?
+            }
+        },
+        None => build_canvas(&video, w, h, None)?,
+    };
 
     let info = canvas.info();
     let accelerated =
@@ -370,27 +451,71 @@ fn wait_for_display(sdl: &sdl2::Sdl) -> (sdl2::VideoSubsystem, sdl2::render::Win
     }
 }
 
+/// Run one sync and report it, keeping the routine case quiet.
+///
+/// Never returns an error: a sync failure is survivable because the frame still
+/// has whatever is already on disk, and the next tick retries.
+async fn sync_once(store: &AzureBlobStore, photo_dir: &Path) {
+    match run_sync(store, photo_dir).await {
+        Ok(plan) => {
+            if plan.is_clean_noop() {
+                vlog!("Sync: no changes.");
+            } else {
+                println!(
+                    "Sync: {} downloaded, {} deleted.",
+                    plan.to_download.len(),
+                    plan.to_delete.len()
+                );
+            }
+            for name in &plan.rejected {
+                eprintln!("Ignored unsafe blob name {name:?} (not a plain filename).");
+            }
+            for (name, reason) in &plan.failed {
+                eprintln!("Sync problem with {name}: {reason}");
+            }
+        }
+        Err(e) => eprintln!("Sync failed (keeping existing photos): {e:#}"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::from_env()?;
 
-    let photo_store = AzureBlobStore::new(
+    let photo_store = Arc::new(AzureBlobStore::new(
         &config.tenant_id,
         &config.client_id,
         &config.client_secret,
         &config.storage_account,
         &config.container,
-    )?;
+    )?);
 
-    // A failed sync is survivable: we still have whatever is already on disk.
-    match run_sync(&photo_store, &config.photo_dir).await {
-        Ok(plan) => println!(
-            "Sync complete: {} downloaded, {} deleted.",
-            plan.to_download.len(),
-            plan.to_delete.len()
-        ),
-        Err(e) => eprintln!("Error during sync: {:#}", e),
+    // Sync runs in the background, on a timer, and deliberately *after* the
+    // display is opened below. Doing it inline at startup meant a frame booting
+    // before Wi-Fi came up sat on a black panel for the whole network timeout -
+    // with the waiting screen, built for exactly that case, unreachable until
+    // the sync returned.
+    {
+        let store = Arc::clone(&photo_store);
+        let photo_dir = config.photo_dir.clone();
+        let interval = config.sync_interval;
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            // `interval` fires immediately on the first tick, so the initial
+            // sync still happens at startup - just without blocking the screen.
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                sync_once(&store, &photo_dir).await;
+            }
+        });
     }
+    println!(
+        "Syncing {}/{} every {}s.",
+        config.storage_account,
+        config.container,
+        config.sync_interval.as_secs()
+    );
 
     let sdl_context = sdl2::init()?;
     log_display_environment();
@@ -407,9 +532,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Decode target: the panel's own resolution, so textures are never larger
     // than what can actually be shown.
     let (mut screen_w, mut screen_h) = canvas.output_size()?;
-    println!("Canvas output size: {screen_w}x{screen_h}");
+    vlog!("Canvas output size: {screen_w}x{screen_h}");
 
-    let mut photos = list_photos(&config.photo_dir);
+    let mut skip: SkipList = SkipList::new();
+    let mut photos = list_photos(&config.photo_dir, &skip);
     // Logged unconditionally: "how many photos did it actually find, and where"
     // is the first question asked whenever the panel looks wrong.
     println!(
@@ -459,7 +585,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Pick up photos a sync has added or removed, without a restart.
         if last_rescan.elapsed() >= RESCAN_INTERVAL {
             last_rescan = Instant::now();
-            let found = list_photos(&config.photo_dir);
+            let found = list_photos(&config.photo_dir, &skip);
             if found != photos {
                 // Stay on the photo currently displayed if it survived, so a
                 // sync does not visibly jolt the rotation.
@@ -468,6 +594,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 index = showing
                     .and_then(|path| photos.iter().position(|p| *p == path))
                     .unwrap_or(0);
+                // A photo arriving mid-interval should still get its full turn.
+                last_advance = Instant::now();
                 needs_load = true;
             }
         }
@@ -488,13 +616,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 &texture_creator,
                 &mut photos,
                 &mut index,
+                &mut skip,
                 screen_w,
                 screen_h,
             );
             match &current {
                 Some(t) => {
                     let q = t.query();
-                    println!(
+                    // Gated: this fires on every rotation, so at the default
+                    // 30s that is ~2900 log lines a day, forever.
+                    vlog!(
                         "Showing [{}/{}] {} ({}x{} texture)",
                         index + 1,
                         photos.len(),
@@ -503,7 +634,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         q.height
                     );
                 }
-                None => println!("Nothing displayable; showing the waiting screen."),
+                None => vlog!("Nothing displayable; showing the waiting screen."),
             }
         }
 
@@ -567,11 +698,7 @@ mod tests {
         // A subdirectory must not be offered to the decoder as a photo.
         std::fs::create_dir(dir.path().join("nested.jpg")).unwrap();
 
-        let names: Vec<String> = list_photos(dir.path())
-            .iter()
-            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
-            .collect();
-
+        let names = names_of(&list_photos(dir.path(), &SkipList::new()));
         assert_eq!(names, vec!["a.png", "b.jpg"]);
     }
 
@@ -581,6 +708,44 @@ mod tests {
         // show the waiting screen, not fall over.
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist");
-        assert!(list_photos(&missing).is_empty());
+        assert!(list_photos(&missing, &SkipList::new()).is_empty());
+    }
+
+    fn names_of(paths: &[PathBuf]) -> Vec<String> {
+        paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn skipped_files_stay_out_of_the_listing() {
+        // The rescan must not resurrect a file that failed to decode, or the
+        // frame re-decodes and re-logs the same failure every 10 seconds.
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["good.jpg", "corrupt.jpg"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+
+        let bad = dir.path().join("corrupt.jpg");
+        let mut skip = SkipList::new();
+        skip.insert(bad.clone(), mtime(&bad));
+
+        assert_eq!(names_of(&list_photos(dir.path(), &skip)), vec!["good.jpg"]);
+    }
+
+    #[test]
+    fn a_replaced_file_gets_another_chance() {
+        // Same name, new bytes (a re-upload): the recorded mtime no longer
+        // matches, so the file returns to the rotation.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("photo.jpg");
+        std::fs::write(&path, b"broken").unwrap();
+
+        let mut skip = SkipList::new();
+        // A timestamp that cannot match the file's real one.
+        skip.insert(path.clone(), Some(SystemTime::UNIX_EPOCH));
+
+        assert_eq!(names_of(&list_photos(dir.path(), &skip)), vec!["photo.jpg"]);
     }
 }

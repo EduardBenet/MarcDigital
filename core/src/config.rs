@@ -25,7 +25,12 @@ const DEFAULT_ROTATION_SECONDS: u64 = 30;
 const DEFAULT_SYNC_INTERVAL_SECONDS: u64 = 1800; // 30 minutes
 
 /// Fully-validated configuration for a running frame.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` is implemented by hand so `client_secret` can be redacted: a stray
+/// `{config:?}`, an `anyhow` context line, or a panic payload would otherwise
+/// print the Entra secret straight into the balena device log, which shows
+/// service variables in plaintext to anyone with fleet access.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Config {
     // Entra service-principal credentials (used to obtain read-only tokens).
     pub tenant_id: String,
@@ -40,6 +45,21 @@ pub struct Config {
     pub photo_dir: PathBuf,
     pub rotation: Duration,
     pub sync_interval: Duration,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("tenant_id", &self.tenant_id)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("storage_account", &self.storage_account)
+            .field("container", &self.container)
+            .field("photo_dir", &self.photo_dir)
+            .field("rotation", &self.rotation)
+            .field("sync_interval", &self.sync_interval)
+            .finish()
+    }
 }
 
 impl Config {
@@ -192,6 +212,26 @@ mod tests {
             .1 = "   ";
         let err = Config::from_source(source(&pairs)).unwrap_err().to_string();
         assert!(err.contains("AZURE_CLIENT_SECRET"), "got: {err}");
+    }
+
+    #[test]
+    fn debug_output_never_contains_the_secret() {
+        let mut pairs = all_required();
+        pairs
+            .iter_mut()
+            .find(|(k, _)| *k == "AZURE_CLIENT_SECRET")
+            .unwrap()
+            .1 = "super-secret-value";
+        let cfg = Config::from_source(source(&pairs)).expect("should load");
+
+        let rendered = format!("{cfg:?}");
+        assert!(
+            !rendered.contains("super-secret-value"),
+            "secret leaked into Debug output: {rendered}"
+        );
+        assert!(rendered.contains("<redacted>"), "got: {rendered}");
+        // The non-sensitive fields are still useful for diagnostics.
+        assert!(rendered.contains("acct"), "got: {rendered}");
     }
 
     #[test]
