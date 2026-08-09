@@ -246,6 +246,37 @@ fn init_video(sdl: &sdl2::Sdl) -> Result<sdl2::VideoSubsystem, String> {
 /// How long to wait before re-attempting a failed video init.
 const VIDEO_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Pick the render driver, preferring GLES2.
+///
+/// Left to itself SDL takes the first driver in its list, which is desktop
+/// `opengl`. The Pi's VideoCore does not do desktop GL, so that resolves to a
+/// Mesa path that creates a context reporting `accelerated: true` and then
+/// never scans out - the app renders perfectly onto a black panel. `opengles2`
+/// is the backend that actually works here.
+///
+/// Returns `None` (meaning "let SDL decide") when GLES2 is not among the
+/// compiled-in drivers, or when `SDL_RENDER_DRIVER` is set so a human can still
+/// override this from the environment.
+fn preferred_render_driver() -> Option<u32> {
+    if std::env::var("SDL_RENDER_DRIVER").is_ok_and(|v| !v.trim().is_empty()) {
+        println!("SDL_RENDER_DRIVER is set; leaving the choice to SDL.");
+        return None;
+    }
+
+    let drivers: Vec<String> = sdl2::render::drivers()
+        .map(|d| d.name.to_string())
+        .collect();
+    println!("Render drivers available: {}", drivers.join(", "));
+
+    match drivers.iter().position(|name| name == "opengles2") {
+        Some(index) => Some(index as u32),
+        None => {
+            eprintln!("opengles2 not available; falling back to SDL's default choice.");
+            None
+        }
+    }
+}
+
 /// Open the display: video subsystem, fullscreen window, and canvas.
 ///
 /// Every step here can fail on a frame whose panel is not ready, so they are
@@ -296,13 +327,11 @@ fn open_display(
         .build()
         .map_err(|e| format!("creating window: {e}"))?;
 
-    // No `.software()`: under KMSDRM the supported path to scanout is the
-    // GLES2/EGL one, and a software renderer can draw a perfectly correct frame
-    // that never reaches the panel. Passing no flags lets SDL walk its render
-    // drivers and take the first that works, so it still degrades to software
-    // if acceleration is genuinely unavailable.
-    let canvas = window
-        .into_canvas()
+    let mut builder = window.into_canvas();
+    if let Some(index) = preferred_render_driver() {
+        builder = builder.index(index);
+    }
+    let canvas = builder
         .build()
         .map_err(|e| format!("creating canvas: {e}"))?;
 
@@ -368,6 +397,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Held for the lifetime of the program: dropping the video subsystem would
     // tear down the window it created.
     let (_video, mut canvas) = wait_for_display(&sdl_context);
+
+    // No pointer on a photo frame. KMSDRM draws a cursor by default even with
+    // no mouse attached, and there is no way to dismiss it on a finished frame.
+    sdl_context.mouse().show_cursor(false);
+
     let texture_creator = canvas.texture_creator();
 
     // Decode target: the panel's own resolution, so textures are never larger
