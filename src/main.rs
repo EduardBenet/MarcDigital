@@ -306,13 +306,12 @@ fn open_display(
         .build()
         .map_err(|e| format!("creating canvas: {e}"))?;
 
+    let info = canvas.info();
+    let accelerated =
+        info.flags & (sdl2::sys::SDL_RendererFlags::SDL_RENDERER_ACCELERATED as u32) != 0;
     println!(
-        "Renderer in use: {} (accelerated: {})",
-        canvas.info().name,
-        canvas
-            .info()
-            .flags
-            .contains(sdl2::render::RendererFlags::ACCELERATED)
+        "Renderer in use: {} (accelerated: {accelerated})",
+        info.name
     );
 
     Ok((video, canvas))
