@@ -1,0 +1,100 @@
+name: Release to balena
+
+# Tagging is the release action: push a `v*` tag and the fleet gets a release
+# built from that exact commit.
+#
+#   git tag -a v0.2.0 -m "..." && git push origin v0.2.0
+#
+# Required repository secret:
+#   BALENA_TOKEN  - balenaCloud > Preferences > Access tokens (an API key, not
+#                   the session token). The balena CLI reads it from the
+#                   environment, so no explicit `balena login` step is needed.
+#
+# Optional repository variable:
+#   BALENA_FLEET  - fleet slug; falls back to the value below.
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Manual runs are useful for re-cutting a release without moving a tag.
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Build a draft release instead of deploying to the fleet"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Never ship something that would not pass CI. Reuses the same workflow rather
+  # than a copy of its steps.
+  verify:
+    uses: ./.github/workflows/main.yml
+
+  release:
+    name: Build and deploy on balena
+    needs: verify
+    runs-on: ubuntu-latest
+    # Without the token the job can only fail confusingly, so skip it instead.
+    if: ${{ github.repository_owner != '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node (balena CLI is an npm package)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install balena CLI
+        run: npm install -g balena-cli
+
+      - name: Verify credentials are present
+        env:
+          BALENA_TOKEN: ${{ secrets.BALENA_TOKEN }}
+        run: |
+          if [ -z "$BALENA_TOKEN" ]; then
+            echo "::error::BALENA_TOKEN secret is not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          balena whoami
+
+      # balena builds the arm64 image on its own native builders, so there is no
+      # cross-compile or QEMU step here - we only hand it the source.
+      #
+      # `--draft` produces a release that is built and stored but NOT rolled out;
+      # promote it from the dashboard when ready. Tag pushes deploy directly;
+      # manual runs default to draft so you can rehearse safely.
+      - name: Push release to balena
+        env:
+          BALENA_TOKEN: ${{ secrets.BALENA_TOKEN }}
+          BALENA_FLEET: ${{ vars.BALENA_FLEET || 'g_eduard_benet/digiframe' }}
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+        run: |
+          set -euo pipefail
+          DRAFT=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.draft }}" = "true" ]; then
+            DRAFT="--draft"
+            echo "Building a DRAFT release (not rolled out to devices)."
+          else
+            echo "Building and DEPLOYING to $BALENA_FLEET."
+          fi
+
+          balena push "$BALENA_FLEET" \
+            --source . \
+            $DRAFT \
+            --release-tag version "$VERSION" commit "${{ github.sha }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### balena release"
+            echo ""
+            echo "- Fleet: \`${{ vars.BALENA_FLEET || 'g_eduard_benet/digiframe' }}\`"
+            echo "- Version: \`${{ github.ref_type == 'tag' && github.ref_name || github.sha }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

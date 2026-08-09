@@ -5,6 +5,9 @@ on:
   pull_request:
   # Callable so the release workflow can gate a balena deploy on these exact
   # checks, instead of duplicating them and letting the two drift apart.
+  # NOTE: GitHub resolves a reusable workflow at the *calling ref's* commit, so
+  # a tag created before this trigger existed fails with "workflow is not
+  # reusable". Tags must point at a commit that contains this block.
   workflow_call:
 
 jobs:
