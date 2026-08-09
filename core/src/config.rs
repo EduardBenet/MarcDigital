@@ -23,6 +23,7 @@ const REQUIRED: &[&str] = &[
 const DEFAULT_PHOTO_DIR: &str = "./synced_photos";
 const DEFAULT_ROTATION_SECONDS: u64 = 30;
 const DEFAULT_SYNC_INTERVAL_SECONDS: u64 = 1800; // 30 minutes
+const DEFAULT_DISPLAY_ROTATION: u16 = 0;
 
 /// Fully-validated configuration for a running frame.
 ///
@@ -43,8 +44,17 @@ pub struct Config {
 
     // Local behavior.
     pub photo_dir: PathBuf,
+    /// How long each photo stays on screen.
     pub rotation: Duration,
     pub sync_interval: Duration,
+    /// Clockwise screen rotation in degrees: 0, 90, 180 or 270.
+    ///
+    /// Needed because a panel's native orientation and the frame's mounting
+    /// orientation are independent: the Touch Display 2 is natively 720x1280
+    /// portrait, so a frame hung landscape needs 90 or 270 here. Done in the
+    /// renderer rather than via a balena host config because the KMS rotation
+    /// knobs are fiddly and a wrong one costs a reboot cycle to discover.
+    pub display_rotation: u16,
 }
 
 impl std::fmt::Debug for Config {
@@ -58,6 +68,7 @@ impl std::fmt::Debug for Config {
             .field("photo_dir", &self.photo_dir)
             .field("rotation", &self.rotation)
             .field("sync_interval", &self.sync_interval)
+            .field("display_rotation", &self.display_rotation)
             .finish()
     }
 }
@@ -106,6 +117,8 @@ impl Config {
             "SYNC_INTERVAL_SECONDS",
         )?;
 
+        let display_rotation = parse_display_rotation(get("DISPLAY_ROTATION"))?;
+
         Ok(Config {
             tenant_id: req("AZURE_TENANT_ID"),
             client_id: req("AZURE_CLIENT_ID"),
@@ -115,7 +128,26 @@ impl Config {
             photo_dir: PathBuf::from(photo_dir),
             rotation,
             sync_interval,
+            display_rotation,
         })
+    }
+}
+
+/// Parse `DISPLAY_ROTATION`, which must be one of 0/90/180/270.
+///
+/// Rejecting anything else is deliberate: an arbitrary angle would render the
+/// slideshow askew with no obvious cause, and on an unattended frame nobody is
+/// watching the logs. Better to refuse to start with a clear message.
+fn parse_display_rotation(value: Option<String>) -> Result<u16> {
+    let Some(raw) = value.filter(|v| !v.trim().is_empty()) else {
+        return Ok(DEFAULT_DISPLAY_ROTATION);
+    };
+    match raw.trim() {
+        "0" => Ok(0),
+        "90" => Ok(90),
+        "180" => Ok(180),
+        "270" => Ok(270),
+        other => bail!("DISPLAY_ROTATION must be 0, 90, 180 or 270, got {other:?}"),
     }
 }
 
@@ -185,6 +217,32 @@ mod tests {
         assert_eq!(cfg.photo_dir, PathBuf::from("/data/photos"));
         assert_eq!(cfg.rotation, Duration::from_secs(10));
         assert_eq!(cfg.sync_interval, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn display_rotation_defaults_to_zero() {
+        let cfg = Config::from_source(source(&all_required())).expect("should load");
+        assert_eq!(cfg.display_rotation, DEFAULT_DISPLAY_ROTATION);
+    }
+
+    #[test]
+    fn accepts_the_four_quarter_turns() {
+        for (raw, expected) in [("0", 0u16), ("90", 90), ("180", 180), ("270", 270)] {
+            let mut pairs = all_required();
+            pairs.push(("DISPLAY_ROTATION", raw));
+            let cfg = Config::from_source(source(&pairs)).expect("should load");
+            assert_eq!(cfg.display_rotation, expected, "for {raw}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_rotation_that_is_not_a_quarter_turn() {
+        for raw in ["45", "-90", "360", "portrait", "90deg"] {
+            let mut pairs = all_required();
+            pairs.push(("DISPLAY_ROTATION", raw));
+            let err = Config::from_source(source(&pairs)).unwrap_err().to_string();
+            assert!(err.contains("DISPLAY_ROTATION"), "for {raw}, got: {err}");
+        }
     }
 
     #[test]

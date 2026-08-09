@@ -188,6 +188,22 @@ fn load_current<'a>(
     None
 }
 
+/// The area a photo is fitted into, given the panel size and how far the
+/// picture is rotated.
+///
+/// At a quarter turn the usable box is the panel with its sides swapped: a
+/// 720x1280 portrait panel showing landscape content is fitted as if it were
+/// 1280x720. The destination rectangle is still centred on the real panel —
+/// `copy_ex` spins it about its own centre, so a rect wider than the screen is
+/// correct and lands inside once rotated.
+fn fit_box(screen_w: u32, screen_h: u32, rotation: u16) -> (u32, u32) {
+    if rotation == 90 || rotation == 270 {
+        (screen_h, screen_w)
+    } else {
+        (screen_w, screen_h)
+    }
+}
+
 /// The "no photos yet" screen: shown on first boot before the first sync lands,
 /// or if every file failed to decode. Deliberately font-free (no SDL_ttf
 /// dependency and no font to ship) — three dim blocks on a dark background,
@@ -533,6 +549,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // than what can actually be shown.
     let (mut screen_w, mut screen_h) = canvas.output_size()?;
     vlog!("Canvas output size: {screen_w}x{screen_h}");
+    if config.display_rotation != 0 {
+        println!("Rotating output by {}deg.", config.display_rotation);
+    }
 
     let mut skip: SkipList = SkipList::new();
     let mut photos = list_photos(&config.photo_dir, &skip);
@@ -612,13 +631,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             needs_load = false;
             // Only ever one decoded photo is held; the previous texture is
             // dropped here, which is what keeps memory flat over a long run.
+            // Decode against the rotated box: on a portrait panel showing
+            // landscape content the limiting dimension is the panel's height,
+            // so sizing to the raw width would throw away detail.
+            let (fit_w, fit_h) = fit_box(screen_w, screen_h, config.display_rotation);
             current = load_current(
                 &texture_creator,
                 &mut photos,
                 &mut index,
                 &mut skip,
-                screen_w,
-                screen_h,
+                fit_w,
+                fit_h,
             );
             match &current {
                 Some(t) => {
@@ -652,13 +675,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 let query = texture.query();
                 let (img_w, img_h) = (query.width as f32, query.height as f32);
-                let scale = f32::min(screen_w as f32 / img_w, screen_h as f32 / img_h);
-                let draw_w = (img_w * scale) as u32;
-                let draw_h = (img_h * scale) as u32;
-                let x = (screen_w.saturating_sub(draw_w) / 2) as i32;
-                let y = (screen_h.saturating_sub(draw_h) / 2) as i32;
+                let (fit_w, fit_h) = fit_box(screen_w, screen_h, config.display_rotation);
+                let scale = f32::min(fit_w as f32 / img_w, fit_h as f32 / img_h);
+                let draw_w = ((img_w * scale) as u32).max(1);
+                let draw_h = ((img_h * scale) as u32).max(1);
 
-                canvas.copy(texture, None, Rect::new(x, y, draw_w, draw_h))?;
+                // Centre on the real panel, using signed maths: at a quarter
+                // turn the rect is deliberately wider than the screen, so the
+                // offset is negative and `saturating_sub` would clamp it wrong.
+                let x = (screen_w as i32 - draw_w as i32) / 2;
+                let y = (screen_h as i32 - draw_h as i32) / 2;
+                let dst = Rect::new(x, y, draw_w, draw_h);
+
+                if config.display_rotation == 0 {
+                    canvas.copy(texture, None, dst)?;
+                } else {
+                    // `None` centre => rotate about the middle of `dst`, which
+                    // is already the middle of the screen.
+                    canvas.copy_ex(
+                        texture,
+                        None,
+                        dst,
+                        config.display_rotation as f64,
+                        None,
+                        false,
+                        false,
+                    )?;
+                }
             }
             None => draw_waiting_screen(&mut canvas)?,
         }
@@ -716,6 +759,33 @@ mod tests {
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn fit_box_swaps_sides_only_on_a_quarter_turn() {
+        // Portrait panel, landscape content: the usable box is the panel laid
+        // on its side.
+        assert_eq!(fit_box(720, 1280, 90), (1280, 720));
+        assert_eq!(fit_box(720, 1280, 270), (1280, 720));
+        // Upright and upside-down keep the panel's own shape.
+        assert_eq!(fit_box(720, 1280, 0), (720, 1280));
+        assert_eq!(fit_box(720, 1280, 180), (720, 1280));
+    }
+
+    #[test]
+    fn a_rotated_landscape_photo_fills_the_portrait_panel() {
+        // 1600x900 photo on a 720x1280 panel rotated 90deg. Fitting into
+        // 1280x720 gives 1280x720 exactly, which after rotation covers the full
+        // width of the panel rather than a thin letterboxed strip.
+        let (fit_w, fit_h) = fit_box(720, 1280, 90);
+        let scale = f32::min(fit_w as f32 / 1600.0, fit_h as f32 / 900.0);
+        let draw_w = (1600.0 * scale) as u32;
+        let draw_h = (900.0 * scale) as u32;
+
+        assert_eq!((draw_w, draw_h), (1280, 720));
+        // Centring uses signed maths because the rect is wider than the panel.
+        let x = (720_i32 - draw_w as i32) / 2;
+        assert!(x < 0, "expected a negative offset, got {x}");
     }
 
     #[test]

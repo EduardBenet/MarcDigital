@@ -37,6 +37,7 @@ Optional, with defaults:
 | `SYNCED_PHOTOS_DIR` | `./synced_photos` | Where synced photos are kept |
 | `ROTATION_SECONDS` | `30` | Seconds each photo is shown |
 | `SYNC_INTERVAL_SECONDS` | `1800` | How often the frame re-syncs from Azure |
+| `DISPLAY_ROTATION` | `0` | Clockwise rotation of the picture: `0`, `90`, `180`, `270` |
 | `MARCDIGITAL_VERBOSE` | unset | `1`/`true`/`yes`/`on` enables verbose diagnostics |
 | `SDL_VIDEODRIVER` | `kmsdrm` (set in compose) | Overrides the SDL video backend |
 | `SDL_RENDER_DRIVER` | unset | Overrides the renderer; unset means the app picks `opengles2` |
@@ -102,13 +103,89 @@ Remaining gaps:
 - Out of scope by design: first-boot Wi-Fi onboarding (balena handles it) and
   prev/next navigation buttons (advance is purely time-based).
 
-### Display notes (hard-won)
-The DSI panel needs all of: the `vc4-kms-dsi-*` overlay via
-`BALENA_HOST_CONFIG_dtoverlay` (Configuration tab, **not** Variables); Mesa in the
-runtime image (`libgl1-mesa-dri`, `libegl-mesa0`, `libgles2`); the `opengles2`
-renderer explicitly, since SDL otherwise picks desktop `opengl`, which reports
-`accelerated: true` and never reaches the screen; and a `present()` every frame,
-because KMSDRM page-flips and a single draw stays in a back buffer.
+## Display setup (DSI panels on a Pi 4)
+
+Getting a DSI panel lit involves four independent layers. Each one fails with a
+misleading error, so they are documented here in the order you should check them.
+
+### 1. Device tree overlay — balena **Configuration**, not Variables
+
+The panel needs a kernel driver, selected by a device tree overlay at boot. Set
+it on the device (or fleet) **Configuration** tab:
+
+| Setting | Value |
+|---|---|
+| `BALENA_HOST_CONFIG_dtoverlay` | `"vc4-kms-v3d,cma-320","vc4-kms-dsi-7inch"` |
+
+Pick the overlay that matches the panel:
+
+| Panel | Overlay | Native resolution |
+|---|---|---|
+| Raspberry Pi 7" Touch Display (original) | `vc4-kms-dsi-7inch` | 800×480 landscape |
+| Raspberry Pi Touch Display 2 | `vc4-kms-dsi-ili9881-7inch` | 720×1280 **portrait** |
+| Waveshare DSI panels | `vc4-kms-dsi-waveshare-*` | varies |
+| Unknown / generic | `vc4-kms-dsi-generic` | — |
+
+Notes that cost real time to learn:
+
+- **`BALENA_HOST_CONFIG_*` only works on the Configuration tab.** Put it under
+  Variables and it is silently ignored — it just becomes an env var in the container.
+- **Keep `vc4-kms-v3d`.** The variable *replaces* the whole `dtoverlay` line, and
+  dropping it removes the display driver entirely. balena strips the `,cma-320`
+  parameter regardless; harmless at these resolutions.
+- The quoted, comma-separated form emits one `dtoverlay=` line per entry.
+- The panel's I²C bridge only appears **after** the overlay loads, so you cannot
+  identify an unknown panel first — you have to try overlays.
+
+### 2. Mesa must be in the runtime image
+
+SDL's KMSDRM backend builds its surface through GBM/EGL even when rendering in
+software, so the container needs `libgl1-mesa-dri`, `libegl-mesa0`, `libgles2`
+(plus `libgbm1`, `libdrm2`). These are in the `Dockerfile`. Missing DRI drivers
+give `EGL not initialized` preceded by `MESA-LOADER` failures; missing
+`libegl-mesa0`/`libgles2` give the same error with no explanation at all.
+
+### 3. The renderer must be `opengles2`
+
+Left to itself SDL picks desktop `opengl` first. VideoCore does not do desktop
+GL, so that resolves to a Mesa path which creates a context reporting
+`accelerated: true` and then never scans out — the app renders perfectly onto a
+black panel. `preferred_render_driver()` selects GLES2 by driver index, with a
+fallback if creation fails. `SDL_RENDER_DRIVER` overrides it.
+
+### 4. Present every frame
+
+Under KMSDRM `present()` page-flips. Drawing once and only re-presenting on
+change leaves the image in a back buffer that is never flipped in, so the panel
+keeps showing the previous (black) front buffer. The main loop therefore
+presents on every tick even when nothing changed.
+
+### Verifying
+
+On the **host OS** terminal:
+
+```sh
+grep -i dtoverlay /mnt/boot/config.txt              # did the config actually land?
+ls /sys/class/drm/                                  # expect a *-DSI-1 entry
+for f in /sys/class/drm/*/status; do echo "$f = $(cat $f)"; done
+vcgencmd get_throttled                              # 0x0 = power is fine
+```
+
+A connector reading `disconnected` means the panel is not answering — usually
+the wrong overlay. No `DSI-1` entry at all means no overlay is loaded.
+
+> **"Reduced functionality" in balenaCloud is usually transient.** It means the
+> VPN is reconnecting while the API heartbeat still works, and it commonly shows
+> for several minutes after any reboot. Wait 5–10 minutes before concluding the
+> device is broken, and check `vcgencmd get_throttled` (`0x0` = no undervoltage)
+> before suspecting power.
+
+### Orientation
+
+Panel orientation and mounting orientation are independent — a Touch Display 2 is
+natively portrait, so a frame hung landscape needs `DISPLAY_ROTATION=90` (or
+`270`, depending on which way up it is mounted). This is applied in the renderer,
+so it needs no host configuration and no reboot to change.
 
 ## License
 MIT — see `LICENSE.md`.

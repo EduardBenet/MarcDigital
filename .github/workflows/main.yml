@@ -1,6 +1,11 @@
 name: Marc Digital
 
-on: [push]
+on:
+  push:
+  pull_request:
+  # Callable so the release workflow can gate a balena deploy on these exact
+  # checks, instead of duplicating them and letting the two drift apart.
+  workflow_call:
 
 jobs:
   build:
