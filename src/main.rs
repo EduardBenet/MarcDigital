@@ -345,21 +345,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Decode target: the panel's own resolution, so textures are never larger
     // than what can actually be shown.
     let (mut screen_w, mut screen_h) = canvas.output_size()?;
+    println!("Canvas output size: {screen_w}x{screen_h}");
 
     let mut photos = list_photos(&config.photo_dir);
+    // Logged unconditionally: "how many photos did it actually find, and where"
+    // is the first question asked whenever the panel looks wrong.
+    println!(
+        "Found {} photo(s) in {}",
+        photos.len(),
+        config.photo_dir.display()
+    );
     if photos.is_empty() {
         // Not an error, and explicitly not an exit: the first sync may not have
         // landed yet, and under `restart: always` exiting here is a crash loop.
-        println!(
-            "No photos in {} yet — showing the waiting screen.",
-            config.photo_dir.display()
-        );
+        println!("No photos yet; showing the waiting screen.");
     }
 
     let mut index = 0usize;
     let mut current: Option<Texture> = None;
     let mut needs_load = true;
-    let mut needs_redraw = true;
     let mut last_advance = Instant::now();
     let mut last_rescan = Instant::now();
 
@@ -385,7 +389,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         screen_h = h;
                         needs_load = true;
                     }
-                    needs_redraw = true;
                 }
                 _ => {}
             }
@@ -426,30 +429,47 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 screen_w,
                 screen_h,
             );
-            needs_redraw = true;
-        }
-
-        if needs_redraw {
-            needs_redraw = false;
             match &current {
-                Some(texture) => {
-                    canvas.set_draw_color(Color::BLACK);
-                    canvas.clear();
-
-                    let query = texture.query();
-                    let (img_w, img_h) = (query.width as f32, query.height as f32);
-                    let scale = f32::min(screen_w as f32 / img_w, screen_h as f32 / img_h);
-                    let draw_w = (img_w * scale) as u32;
-                    let draw_h = (img_h * scale) as u32;
-                    let x = (screen_w.saturating_sub(draw_w) / 2) as i32;
-                    let y = (screen_h.saturating_sub(draw_h) / 2) as i32;
-
-                    canvas.copy(texture, None, Rect::new(x, y, draw_w, draw_h))?;
+                Some(t) => {
+                    let q = t.query();
+                    println!(
+                        "Showing [{}/{}] {} ({}x{} texture)",
+                        index + 1,
+                        photos.len(),
+                        photos[index].display(),
+                        q.width,
+                        q.height
+                    );
                 }
-                None => draw_waiting_screen(&mut canvas)?,
+                None => println!("Nothing displayable; showing the waiting screen."),
             }
-            canvas.present();
         }
+
+        // Redraw and present EVERY tick, even when nothing changed.
+        //
+        // Presenting only on change is wrong under KMSDRM: `present` page-flips,
+        // so a single draw leaves the image in a back buffer that is never
+        // flipped in again and the panel keeps showing the previous (black)
+        // front buffer. Re-presenting a static 800x480 software canvas is a few
+        // MB/s of memcpy - free on a Pi 4, and worth far more as correctness.
+        match &current {
+            Some(texture) => {
+                canvas.set_draw_color(Color::BLACK);
+                canvas.clear();
+
+                let query = texture.query();
+                let (img_w, img_h) = (query.width as f32, query.height as f32);
+                let scale = f32::min(screen_w as f32 / img_w, screen_h as f32 / img_h);
+                let draw_w = (img_w * scale) as u32;
+                let draw_h = (img_h * scale) as u32;
+                let x = (screen_w.saturating_sub(draw_w) / 2) as i32;
+                let y = (screen_h.saturating_sub(draw_h) / 2) as i32;
+
+                canvas.copy(texture, None, Rect::new(x, y, draw_w, draw_h))?;
+            }
+            None => draw_waiting_screen(&mut canvas)?,
+        }
+        canvas.present();
 
         std::thread::sleep(TICK);
     }
