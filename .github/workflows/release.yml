@@ -70,6 +70,21 @@ jobs:
           balena login --token "$BALENA_TOKEN"
           echo "Authenticated as: $(balena whoami)"
 
+      # Give the balena release the same identity as the git tag. Without this
+      # the dashboard shows anonymous commit-hash releases and there is no way
+      # to tell at a glance which release corresponds to which tag.
+      - name: Stamp release version from the git tag
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"   # v1.0.1 -> 1.0.1
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$'; then
+            echo "::error::Tag '$GITHUB_REF_NAME' is not semver. balena release versioning needs MAJOR.MINOR.PATCH (tags may be prefixed with 'v')."
+            exit 1
+          fi
+          sed -i -E "s/^version: .*/version: $VERSION/" balena.yml
+          echo "balena.yml now declares: $(grep '^version:' balena.yml)"
+
       # balena builds the arm64 image on its own native builders, so there is no
       # cross-compile or QEMU step here - we only hand it the source.
       #

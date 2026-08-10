@@ -1,0 +1,39 @@
+# balenaCloud / balenaHub project metadata.
+#
+# The field that earns its keep here is `version`: balena uses it to give each
+# release a semver identity (shown as e.g. `1.0.1+rev1` in the dashboard) rather
+# than an anonymous commit hash. CI overwrites it from the git tag before
+# pushing, so one `git tag` produces three things that agree with each other:
+#
+#   git tag v1.0.1  ->  GitHub Release v1.0.1  ->  balena release 1.0.1+rev1
+#
+# The remaining fields are balenaHub metadata. This project is not published, so
+# they are documentation more than configuration.
+
+name: MarcDigital
+type: sw.application
+version: 1.0.0
+
+description: >-
+  A digital photo frame for older family members. Relatives add photos to Azure
+  Blob Storage; the frame syncs them and shows a rotating fullscreen slideshow.
+  Runs unattended on a Raspberry Pi with a DSI panel.
+
+defaultDeviceType: raspberrypi4-64
+supportedDeviceTypes:
+  - raspberrypi4-64
+
+post-provisioning: >-
+  Set the five Azure service variables (AZURE_TENANT_ID, AZURE_CLIENT_ID,
+  AZURE_CLIENT_SECRET, AZURE_STORAGE_ACCOUNT, CONTAINER_NAME) on the fleet.
+
+  For a DSI panel, set BALENA_HOST_CONFIG_dtoverlay on the *Configuration* tab
+  (not Variables) to the overlay matching the panel — for example
+  "vc4-kms-v3d,cma-320","vc4-kms-dsi-7inch" for the original 7" Touch Display,
+  or "vc4-kms-v3d,cma-320","vc4-kms-dsi-ili9881-7inch" for Touch Display 2.
+
+  If the panel's native orientation does not match how the frame is mounted, set
+  DISPLAY_ROTATION to 90, 180 or 270.
+
+  If the device cannot reach a network it raises a "MarcDigital Setup" Wi-Fi
+  hotspot; join it from a phone to choose the house network.
