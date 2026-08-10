@@ -22,12 +22,42 @@ use sdl2::rect::Rect;
 use sdl2::render::{Texture, TextureCreator};
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use marcdigital_core::config::Config;
 use marcdigital_core::sync::run_sync;
 
 mod store;
 use store::AzureBlobStore;
+
+/// UTC timestamp for a log line, `2026-08-10T12:34:56Z`.
+///
+/// The frame runs for months and its logs are read long after the fact, so a
+/// bare message is close to useless — "sync failed" means nothing without
+/// knowing whether it was once at 3am or every 30s all week. Sub-second
+/// precision is dropped: nothing here happens fast enough to need it.
+fn now() -> String {
+    OffsetDateTime::now_utc()
+        .replace_nanosecond(0)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown-time".to_string())
+}
+
+/// Timestamped `println!`.
+macro_rules! logln {
+    ($($arg:tt)*) => {
+        println!("{} {}", now(), format_args!($($arg)*))
+    };
+}
+
+/// Timestamped `eprintln!`, for warnings and errors.
+macro_rules! logerr {
+    ($($arg:tt)*) => {
+        eprintln!("{} {}", now(), format_args!($($arg)*))
+    };
+}
 
 /// Whether to emit verbose diagnostics.
 ///
@@ -54,7 +84,7 @@ fn verbose() -> bool {
 macro_rules! vlog {
     ($($arg:tt)*) => {
         if verbose() {
-            println!($($arg)*);
+            logln!($($arg)*);
         }
     };
 }
@@ -109,7 +139,7 @@ fn list_photos(dir: &Path, skip: &SkipList) -> Vec<PathBuf> {
             })
             .collect(),
         Err(e) => {
-            eprintln!("Could not read {}: {e}", dir.display());
+            logerr!("Could not read {}: {e}", dir.display());
             Vec::new()
         }
     };
@@ -179,7 +209,7 @@ fn load_current<'a>(
                 // down. It stays on disk (the next sync owns deleting it) but
                 // is remembered so later rescans do not retry it forever.
                 let bad = photos.remove(*index);
-                eprintln!("Skipping {}: {e}", bad.display());
+                logerr!("Skipping {}: {e}", bad.display());
                 let stamp = mtime(&bad);
                 skip.insert(bad, stamp);
             }
@@ -242,13 +272,13 @@ fn log_display_environment() {
                 .collect();
             nodes.sort();
             if nodes.is_empty() {
-                println!("/dev/dri exists but is empty (no card/render nodes in this container)");
+                logln!("/dev/dri exists but is empty (no card/render nodes in this container)");
             } else {
                 vlog!("/dev/dri contains: {}", nodes.join(", "));
             }
         }
         // Not gated: no DRM nodes means the display can never work.
-        Err(e) => println!("/dev/dri not visible from this container: {e}"),
+        Err(e) => logln!("/dev/dri not visible from this container: {e}"),
     }
 
     // SDL's KMSDRM backend opens a VT to take over the console; without one it
@@ -297,11 +327,11 @@ fn init_video(sdl: &sdl2::Sdl) -> Result<sdl2::VideoSubsystem, String> {
         std::env::set_var("SDL_VIDEODRIVER", driver);
         match sdl.video() {
             Ok(video) => {
-                println!("Video driver in use: {driver}");
+                logln!("Video driver in use: {driver}");
                 return Ok(video);
             }
             Err(e) => {
-                eprintln!("Video driver {driver} unavailable: {e}");
+                logerr!("Video driver {driver} unavailable: {e}");
                 errors.push(format!("{driver}: {e}"));
             }
         }
@@ -342,7 +372,7 @@ fn preferred_render_driver() -> Option<u32> {
     match drivers.iter().position(|name| name == "opengles2") {
         Some(index) => Some(index as u32),
         None => {
-            eprintln!("opengles2 not available; falling back to SDL's default choice.");
+            logerr!("opengles2 not available; falling back to SDL's default choice.");
             None
         }
     }
@@ -404,7 +434,7 @@ fn open_display(
                 }
             }
         }
-        Err(e) => eprintln!("Could not enumerate displays: {e}"),
+        Err(e) => logerr!("Could not enumerate displays: {e}"),
     }
 
     let (w, h) = match video.display_bounds(0) {
@@ -412,7 +442,7 @@ fn open_display(
         Err(e) => {
             // Not fatal: fullscreen_desktop ignores the requested size anyway,
             // so any plausible value gets us to a window.
-            eprintln!("Could not query display bounds ({e}); falling back to 1280x720");
+            logerr!("Could not query display bounds ({e}); falling back to 1280x720");
             (1280, 720)
         }
     };
@@ -425,7 +455,7 @@ fn open_display(
         Some(index) => match build_canvas(&video, w, h, Some(index)) {
             Ok(canvas) => canvas,
             Err(e) => {
-                eprintln!("Preferred renderer (opengles2) failed: {e}. Letting SDL choose.");
+                logerr!("Preferred renderer (opengles2) failed: {e}. Letting SDL choose.");
                 build_canvas(&video, w, h, None)?
             }
         },
@@ -435,7 +465,7 @@ fn open_display(
     let info = canvas.info();
     let accelerated =
         info.flags & (sdl2::sys::SDL_RendererFlags::SDL_RENDERER_ACCELERATED as u32) != 0;
-    println!(
+    logln!(
         "Renderer in use: {} (accelerated: {accelerated})",
         info.name
     );
@@ -456,7 +486,7 @@ fn wait_for_display(sdl: &sdl2::Sdl) -> (sdl2::VideoSubsystem, sdl2::render::Win
             Ok(display) => return display,
             Err(e) => {
                 attempt += 1;
-                eprintln!(
+                logerr!(
                     "No display yet (attempt {attempt}): {e}. \
                      Retrying in {}s; the frame stays running.",
                     VIDEO_RETRY_INTERVAL.as_secs()
@@ -477,20 +507,20 @@ async fn sync_once(store: &AzureBlobStore, photo_dir: &Path) {
             if plan.is_clean_noop() {
                 vlog!("Sync: no changes.");
             } else {
-                println!(
+                logln!(
                     "Sync: {} downloaded, {} deleted.",
                     plan.to_download.len(),
                     plan.to_delete.len()
                 );
             }
             for name in &plan.rejected {
-                eprintln!("Ignored unsafe blob name {name:?} (not a plain filename).");
+                logerr!("Ignored unsafe blob name {name:?} (not a plain filename).");
             }
             for (name, reason) in &plan.failed {
-                eprintln!("Sync problem with {name}: {reason}");
+                logerr!("Sync problem with {name}: {reason}");
             }
         }
-        Err(e) => eprintln!("Sync failed (keeping existing photos): {e:#}"),
+        Err(e) => logerr!("Sync failed (keeping existing photos): {e:#}"),
     }
 }
 
@@ -526,7 +556,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         });
     }
-    println!(
+    logln!(
         "Syncing {}/{} every {}s.",
         config.storage_account,
         config.container,
@@ -550,14 +580,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (mut screen_w, mut screen_h) = canvas.output_size()?;
     vlog!("Canvas output size: {screen_w}x{screen_h}");
     if config.display_rotation != 0 {
-        println!("Rotating output by {}deg.", config.display_rotation);
+        logln!("Rotating output by {}deg.", config.display_rotation);
     }
 
     let mut skip: SkipList = SkipList::new();
     let mut photos = list_photos(&config.photo_dir, &skip);
     // Logged unconditionally: "how many photos did it actually find, and where"
     // is the first question asked whenever the panel looks wrong.
-    println!(
+    logln!(
         "Found {} photo(s) in {}",
         photos.len(),
         config.photo_dir.display()
@@ -565,7 +595,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if photos.is_empty() {
         // Not an error, and explicitly not an exit: the first sync may not have
         // landed yet, and under `restart: always` exiting here is a crash loop.
-        println!("No photos yet; showing the waiting screen.");
+        logln!("No photos yet; showing the waiting screen.");
     }
 
     let mut index = 0usize;

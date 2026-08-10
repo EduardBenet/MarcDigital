@@ -16,6 +16,9 @@ azure_storage_blob = "1"
 futures = "0.3.31"
 sdl2 = { version = "0.38.0", features = ["image"] }
 tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "time"] }
+# Timestamps for log lines. Already in the tree via the Azure SDK, so making it
+# a direct dependency costs no extra build.
+time = { version = "0.3.55", features = ["formatting"] }
 url = "2.5.7"
 
 [dev-dependencies]
