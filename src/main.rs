@@ -185,6 +185,91 @@ fn load_scaled_texture<'a>(
         .map_err(|e| e.to_string())
 }
 
+/// How a stored image must be transformed to appear the right way up.
+///
+/// A phone stores pixels in the sensor's own orientation and records an EXIF
+/// tag saying how to rotate them for display. SDL2_image ignores that tag, so a
+/// photo straight from a camera lands sideways — while the same scene sent via
+/// WhatsApp looks fine, because WhatsApp re-encodes with the rotation baked into
+/// the pixels and the tag stripped.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+struct Orientation {
+    /// Clockwise degrees to rotate: 0, 90, 180 or 270.
+    rotate: u16,
+    flip_h: bool,
+}
+
+impl Orientation {
+    /// Map an EXIF orientation value (1-8) onto a rotation plus optional mirror.
+    ///
+    /// 1/3/6/8 are pure rotations and cover essentially every real camera photo.
+    /// 2/4/5/7 are mirrored variants, produced by some editing software; they
+    /// are handled for completeness rather than because they are expected.
+    fn from_exif_tag(value: u16) -> Self {
+        match value {
+            2 => Self {
+                rotate: 0,
+                flip_h: true,
+            },
+            3 => Self {
+                rotate: 180,
+                flip_h: false,
+            },
+            4 => Self {
+                rotate: 180,
+                flip_h: true,
+            }, // flip vertical
+            5 => Self {
+                rotate: 90,
+                flip_h: true,
+            }, // transpose
+            6 => Self {
+                rotate: 90,
+                flip_h: false,
+            },
+            7 => Self {
+                rotate: 270,
+                flip_h: true,
+            }, // transverse
+            8 => Self {
+                rotate: 270,
+                flip_h: false,
+            },
+            // 1 is "already upright"; anything unexpected is treated the same,
+            // because guessing would be worse than leaving the photo alone.
+            _ => Self::default(),
+        }
+    }
+}
+
+/// Read a photo's EXIF orientation, defaulting to "already upright".
+///
+/// Every failure path — no EXIF block, not a JPEG, truncated header — returns
+/// the default rather than an error. A missing tag is the *normal* case for PNGs
+/// and for anything a messaging app has re-encoded.
+fn exif_orientation(path: &Path) -> Orientation {
+    let Ok(file) = std::fs::File::open(path) else {
+        return Orientation::default();
+    };
+    let mut reader = std::io::BufReader::new(file);
+    let Ok(data) = exif::Reader::new().read_from_container(&mut reader) else {
+        return Orientation::default();
+    };
+    data.get_field(exif::Tag::Orientation, exif::In::PRIMARY)
+        .and_then(|field| field.value.get_uint(0))
+        .map(|value| Orientation::from_exif_tag(value as u16))
+        .unwrap_or_default()
+}
+
+/// A decoded photo plus how to draw it.
+struct Displayed<'a> {
+    texture: Texture<'a>,
+    /// Total clockwise rotation: the panel correction (`DISPLAY_ROTATION`) plus
+    /// the photo's own EXIF orientation, which are independent of each other.
+    rotation: u16,
+    flip_h: bool,
+}
+
 /// Load the photo at `index`, skipping past any file that fails to decode.
 ///
 /// A corrupt or truncated image is dropped from `photos`, recorded in `skip`
@@ -195,15 +280,29 @@ fn load_current<'a>(
     photos: &mut Vec<PathBuf>,
     index: &mut usize,
     skip: &mut SkipList,
-    max_w: u32,
-    max_h: u32,
-) -> Option<Texture<'a>> {
+    screen_w: u32,
+    screen_h: u32,
+    display_rotation: u16,
+) -> Option<Displayed<'a>> {
     while !photos.is_empty() {
         if *index >= photos.len() {
             *index = 0;
         }
-        match load_scaled_texture(creator, &photos[*index], max_w, max_h) {
-            Ok(texture) => return Some(texture),
+        // Orientation has to be known *before* decoding: a photo rotated a
+        // quarter turn is fitted against the panel's other axis, so sizing it
+        // first would throw away resolution.
+        let orientation = exif_orientation(&photos[*index]);
+        let rotation = (display_rotation + orientation.rotate) % 360;
+        let (fit_w, fit_h) = fit_box(screen_w, screen_h, rotation);
+
+        match load_scaled_texture(creator, &photos[*index], fit_w, fit_h) {
+            Ok(texture) => {
+                return Some(Displayed {
+                    texture,
+                    rotation,
+                    flip_h: orientation.flip_h,
+                })
+            }
             Err(e) => {
                 // Skipping is deliberate: one bad file must not take the frame
                 // down. It stays on disk (the next sync owns deleting it) but
@@ -605,7 +704,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut index = 0usize;
-    let mut current: Option<Texture> = None;
+    let mut current: Option<Displayed> = None;
     let mut needs_load = true;
     let mut last_advance = Instant::now();
     let mut last_rescan = Instant::now();
@@ -667,30 +766,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
             needs_load = false;
             // Only ever one decoded photo is held; the previous texture is
             // dropped here, which is what keeps memory flat over a long run.
-            // Decode against the rotated box: on a portrait panel showing
-            // landscape content the limiting dimension is the panel's height,
-            // so sizing to the raw width would throw away detail.
-            let (fit_w, fit_h) = fit_box(screen_w, screen_h, config.display_rotation);
+            // The fit box is computed per photo inside, because each one's EXIF
+            // orientation changes which panel axis is the limiting one.
             current = load_current(
                 &texture_creator,
                 &mut photos,
                 &mut index,
                 &mut skip,
-                fit_w,
-                fit_h,
+                screen_w,
+                screen_h,
+                config.display_rotation,
             );
             match &current {
-                Some(t) => {
-                    let q = t.query();
+                Some(shown) => {
+                    let q = shown.texture.query();
                     // Gated: this fires on every rotation, so at the default
                     // 30s that is ~2900 log lines a day, forever.
                     vlog!(
-                        "Showing [{}/{}] {} ({}x{} texture)",
+                        "Showing [{}/{}] {} ({}x{} texture, rotate {}deg{})",
                         index + 1,
                         photos.len(),
                         photos[index].display(),
                         q.width,
-                        q.height
+                        q.height,
+                        shown.rotation,
+                        if shown.flip_h { ", mirrored" } else { "" }
                     );
                 }
                 None => vlog!("Nothing displayable; showing the waiting screen."),
@@ -705,13 +805,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // front buffer. Re-presenting a static 800x480 software canvas is a few
         // MB/s of memcpy - free on a Pi 4, and worth far more as correctness.
         match &current {
-            Some(texture) => {
+            Some(shown) => {
                 canvas.set_draw_color(Color::BLACK);
                 canvas.clear();
 
-                let query = texture.query();
+                let query = shown.texture.query();
                 let (img_w, img_h) = (query.width as f32, query.height as f32);
-                let (fit_w, fit_h) = fit_box(screen_w, screen_h, config.display_rotation);
+                // Same box the texture was decoded against, so the fit is exact.
+                let (fit_w, fit_h) = fit_box(screen_w, screen_h, shown.rotation);
                 let scale = f32::min(fit_w as f32 / img_w, fit_h as f32 / img_h);
                 let draw_w = ((img_w * scale) as u32).max(1);
                 let draw_h = ((img_h * scale) as u32).max(1);
@@ -723,18 +824,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let y = (screen_h as i32 - draw_h as i32) / 2;
                 let dst = Rect::new(x, y, draw_w, draw_h);
 
-                if config.display_rotation == 0 {
-                    canvas.copy(texture, None, dst)?;
+                if shown.rotation == 0 && !shown.flip_h {
+                    canvas.copy(&shown.texture, None, dst)?;
                 } else {
                     // `None` centre => rotate about the middle of `dst`, which
                     // is already the middle of the screen.
                     canvas.copy_ex(
-                        texture,
+                        &shown.texture,
                         None,
                         dst,
-                        config.display_rotation as f64,
+                        shown.rotation as f64,
                         None,
-                        false,
+                        shown.flip_h,
                         false,
                     )?;
                 }
@@ -795,6 +896,70 @@ mod tests {
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn exif_tag_6_is_a_quarter_turn_clockwise() {
+        // The common phone-camera case, and the one that surfaced this: pixels
+        // stored landscape with a tag saying "rotate 90 CW to display".
+        let o = Orientation::from_exif_tag(6);
+        assert_eq!(o.rotate, 90);
+        assert!(!o.flip_h);
+    }
+
+    #[test]
+    fn upright_and_unknown_tags_need_no_correction() {
+        for tag in [1u16, 0, 9, 42] {
+            assert_eq!(
+                Orientation::from_exif_tag(tag),
+                Orientation::default(),
+                "tag {tag} should be treated as upright"
+            );
+        }
+    }
+
+    #[test]
+    fn every_exif_tag_maps_to_a_quarter_turn() {
+        for tag in 1u16..=8 {
+            let o = Orientation::from_exif_tag(tag);
+            assert!(
+                matches!(o.rotate, 0 | 90 | 180 | 270),
+                "tag {tag} produced {}deg",
+                o.rotate
+            );
+        }
+        // The four mirrored variants are the ones that also flip.
+        for tag in [2u16, 4, 5, 7] {
+            assert!(Orientation::from_exif_tag(tag).flip_h, "tag {tag}");
+        }
+        for tag in [1u16, 3, 6, 8] {
+            assert!(!Orientation::from_exif_tag(tag).flip_h, "tag {tag}");
+        }
+    }
+
+    #[test]
+    fn exif_and_display_rotation_compose() {
+        // A portrait panel needing 90deg, showing a photo that itself needs
+        // 270deg, must end up at 0 - not at either value alone.
+        let display = 90u16;
+        let photo = Orientation::from_exif_tag(8); // 270
+        assert_eq!((display + photo.rotate) % 360, 0);
+
+        let photo = Orientation::from_exif_tag(6); // 90
+        assert_eq!((display + photo.rotate) % 360, 180);
+    }
+
+    #[test]
+    fn a_file_without_exif_is_treated_as_upright() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("not-a-photo.jpg");
+        std::fs::write(&path, b"definitely not a JPEG").unwrap();
+        assert_eq!(exif_orientation(&path), Orientation::default());
+        // A missing file must not panic either.
+        assert_eq!(
+            exif_orientation(&dir.path().join("absent.jpg")),
+            Orientation::default()
+        );
     }
 
     #[test]

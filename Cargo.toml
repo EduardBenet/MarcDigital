@@ -14,6 +14,9 @@ azure_core = "1"
 azure_identity = "1"
 azure_storage_blob = "1"
 futures = "0.3.31"
+# Reads the EXIF orientation tag. SDL2_image ignores it, so photos straight from
+# a phone camera render sideways without this.
+kamadak-exif = "0.6"
 sdl2 = { version = "0.38.0", features = ["image"] }
 tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "time"] }
 # Timestamps for log lines. Already in the tree via the Azure SDK, so making it
