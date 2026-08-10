@@ -24,5 +24,39 @@ services:
       - synced_photos:/digital_frame/synced_photos
     network_mode: "host" # ensures SDL2 can access display if needed
 
+  # Wi-Fi provisioning for a frame that will live on someone else's network.
+  #
+  # Without this a frame handed to a relative can never join their Wi-Fi: there
+  # is no keyboard, no shell, and no input on the slideshow. It would sit there
+  # replaying whatever photos were cached before delivery, forever.
+  #
+  # The balenaLabs block watches connectivity and, when the device cannot reach
+  # a network, raises its own hotspot with a captive portal. A phone joins that
+  # hotspot, picks the house network, types the password, and the credentials
+  # are saved to NetworkManager. It stands down once connected.
+  #
+  # The slideshow keeps running throughout - the two services are independent,
+  # so the frame shows its existing photos while waiting to be provisioned.
+  wifi-connect:
+    # Architecture-specific image; this is the aarch64 build for raspberrypi4-64.
+    image: bh.cr/balenalabs/wifi-connect-aarch64
+    restart: always
+    # Must share the host network stack to manage the real interfaces.
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    labels:
+      # NetworkManager lives on the host's D-Bus. Without this the block cannot
+      # scan for networks, raise the hotspot, or persist the chosen credentials.
+      io.balena.features.dbus: "1"
+    environment:
+      - DBUS_SYSTEM_BUS_ADDRESS=unix:path=/host/run/dbus/system_bus_socket
+      # The hotspot name the family will see on their phone. Keep it recognisable
+      # - this is the only instruction they get.
+      - PORTAL_SSID=MarcDigital Setup
+      # Give a known network time to associate on boot first, so a normal reboot
+      # does not briefly raise a setup hotspot.
+      - DELAY_BEFORE_CONFIGURING=30
+
 volumes:
   synced_photos:

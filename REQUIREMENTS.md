@@ -13,8 +13,17 @@ A **digital photo frame** for older family members. Relatives push photos to clo
 - Deployment: **Balena** (containers pushed as fleet updates). See Open Issues.
 
 ## 3. Functional requirements
-1. **First-boot Wi-Fi onboarding — handled by Balena, not app code.** Balena provides Wi-Fi provisioning (captive portal / `wifi-connect`); the app does **not** implement a Wi-Fi screen. The app assumes connectivity is present.
-2. **Cloud photo storage + local sync.** Master copy of images lives in **Azure Blob Storage**; the frame keeps a **local copy synced periodically**. Sync is diff-based: download new blobs, delete local files no longer in the cloud, track state in a manifest. *(Periodic re-sync deferred — currently syncs once at boot.)*
+1. **Wi-Fi onboarding — a `wifi-connect` service, not app code.**
+   Corrected 2026-08-10: balenaOS does **not** ship a captive portal. The earlier
+   assumption that "Balena handles it" was wrong, and a frame delivered to a relative
+   could never have joined their network — no keyboard, no shell, no input on the
+   slideshow. The fleet therefore runs the **balenaLabs `wifi-connect` block as a second
+   service** in `docker-compose.yaml`: when the device has no connectivity it raises its
+   own hotspot (`MarcDigital Setup`) with a captive portal, a phone joins it and picks the
+   house network, and the credentials are saved to NetworkManager. The slideshow service is
+   independent and keeps showing cached photos throughout. The app itself still implements
+   no Wi-Fi UI.
+2. **Cloud photo storage + local sync.** Master copy of images lives in **Azure Blob Storage**; the frame keeps a **local copy synced periodically** (`SYNC_INTERVAL_SECONDS`, default 30 min, in a background task started *after* the display opens). Sync is diff-based: download new blobs, delete local files no longer in the cloud. The folder contents *are* the manifest — there is no separate state file. Downloads are atomic (`name.tmp` + rename); blob names that are not plain filenames are rejected; a single blob failure does not abort the rest.
 3. **Slideshow — purely time-based.** Fullscreen, aspect-ratio-preserving. Advance to the next image every X seconds. **No navigation buttons, no GPIO.**
 
 ## 4. Non-functional requirements
@@ -33,26 +42,47 @@ armv6-vs-armv7 mismatch). The Zero 2 W was the interim pick; we moved up to the 
 power. Both are aarch64, so the native-build plan is unchanged — only the balena device type differs.
 
 ## 6. Current implementation status
-- ✅ Azure Blob sync (`src/fetcher.rs`): diff against manifest, download/delete, rewrite manifest.
-- ✅ SDL2 fullscreen slideshow (`src/main.rs`): scales to fit, time-based rotation.
-- ⚠️ Cross-compile Dockerfile (armv6) — **the current blocker**, see §8.
-- 🚫 Wi-Fi screen — out of scope (Balena handles it).
+Running on real hardware (Pi 4, balena fleet `digiframe`) since 2026-08-09.
+
+- ✅ Azure Blob sync (`core/src/sync.rs` + `src/store.rs`): Entra service-principal auth,
+  diff-based, atomic downloads, name validation, per-blob error recovery, periodic.
+- ✅ SDL2 fullscreen slideshow (`src/main.rs`): one texture at a time downscaled to the
+  panel, corrupt files skipped and remembered, waiting screen when empty, `DISPLAY_ROTATION`
+  for landscape/portrait mismatch, cursor hidden, retries instead of exiting when the
+  display is not ready.
+- ✅ aarch64 Dockerfile + balena compose (the armv6 cross-compile hack is gone).
+- ✅ CI (fmt/clippy/test/build) and tag-driven release to balena + GitHub Releases.
+- ✅ Wi-Fi provisioning via the `wifi-connect` block (see §3.1).
 - 🚫 Nav buttons / GPIO — out of scope (time-based only).
-- ⏳ Periodic re-sync — deferred (syncs once at boot for now).
-- ❌ Secrets hygiene (see gaps).
+- ⏳ Companion app (§9b) — not started; today only the maintainer can add photos.
+- ⏳ Azurite integration tests — `src/store.rs` still has no test coverage.
 
 ## 7. Known gaps / tech debt
-- **Secrets committed to git**: a live-style SAS token appears in `src/main.rs` default and `docker-compose.yaml`. Even if expired, rotate and remove; load only from env. Consider `azure_identity` managed identity or a mounted secret.
-- **Sync runs once at boot**, not periodically — needs a timer/loop (deferred).
-- **No error resilience**: many `.unwrap()`s; a bad image or network blip can crash the frame.
-- **`fetcher::sync_folder` uses its own `#[tokio::main]`** while `main` is sync — inconsistent async model; unify.
-- **CI** was Python-only; replaced with a Rust build workflow.
+Resolved: the leaked SAS (the `benetmilian` account was deleted, so it cannot be used —
+the git-history purge was dropped as pointless); sync-once-at-boot; the `.unwrap()`s in the
+render path; the split async model; Python-only CI.
 
-## 8. Build plan (aarch64 / Zero 2 W)
-- Rewrite the Dockerfile for **aarch64** — balena builds arm64 natively, so drop the whole
-  `raspberrypi/tools` cross-compile hack. Build against a `balenalib/raspberrypi-zero-2-w-debian`
-  (or generic `arm64` Debian) base; install SDL2 from apt (arm64 has proper packages).
-- `.cargo/config.toml` armv6 target block becomes unnecessary for the balena build.
+Open:
+- **`src/store.rs` has no tests.** The Azure client is the only component verified purely by
+  hand. Azurite integration tests are the fix (§ Implementation Plan 3.2).
+- **`std::env::set_var` runs inside the multi-threaded tokio runtime** (`src/main.rs`,
+  video-driver selection). Unsound in principle, and a hard error on edition 2024.
+- **Dockerfile builder stage has no `--platform`.** Correct on balena's arm64 builders;
+  `docker compose up --build` on an x86 dev machine silently produces an unusable image.
+- **Secrets are plaintext in the balena dashboard.** No masked-variable feature exists.
+  Mitigated by least privilege (read-only, one container) rather than solved; the token
+  broker in §9 is the real fix if it ever matters.
+- **No secret scanning in CI.** Worth adding scoped to new commits.
+
+## 8. Build plan (aarch64) — DONE
+- Dockerfile builds natively for **aarch64** on balena's builders; the `raspberrypi/tools`
+  cross-compile hack and the armv6 `.cargo/config.toml` block are both removed.
+- SDL2 installed from apt, linked dynamically.
+- **Mesa is required at runtime** (`libgl1-mesa-dri`, `libegl-mesa0`, `libgles2`, `libgbm1`,
+  `libdrm2`): SDL's KMSDRM backend builds its surface through GBM/EGL even when rendering in
+  software. See the README's *Display setup* section for the full four-layer chain
+  (overlay → Mesa → `opengles2` → present-every-frame), each of which fails with a
+  misleading error on its own.
 - Keep dynamic SDL2 linking (no `static-link`).
 
 ## 9. Azure access & secrets — target design
