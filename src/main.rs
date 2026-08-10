@@ -586,12 +586,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut skip: SkipList = SkipList::new();
     let mut photos = list_photos(&config.photo_dir, &skip);
     // Logged unconditionally: "how many photos did it actually find, and where"
-    // is the first question asked whenever the panel looks wrong.
-    logln!(
-        "Found {} photo(s) in {}",
-        photos.len(),
-        config.photo_dir.display()
-    );
+    // is the first question asked whenever the panel looks wrong. The path is
+    // canonicalised because the configured value is relative by default
+    // (`./synced_photos`), and "is that the mounted volume or a directory
+    // inside the container?" is exactly what you need to know at that moment.
+    let resolved = std::fs::canonicalize(&config.photo_dir)
+        .unwrap_or_else(|_| config.photo_dir.clone())
+        .display()
+        .to_string();
+    // "so far" because the first sync may still be writing: it runs in the
+    // background and is deliberately not waited on, so this count can lag it by
+    // up to one rescan interval.
+    logln!("Found {} photo(s) so far in {}", photos.len(), resolved);
     if photos.is_empty() {
         // Not an error, and explicitly not an exit: the first sync may not have
         // landed yet, and under `restart: always` exiting here is a crash loop.

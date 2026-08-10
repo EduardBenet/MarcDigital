@@ -7,8 +7,9 @@ name: Release to balena
 #
 # Required repository secret:
 #   BALENA_TOKEN  - balenaCloud > Preferences > Access tokens (an API key, not
-#                   the session token). The balena CLI reads it from the
-#                   environment, so no explicit `balena login` step is needed.
+#                   the session token). Note the CLI does NOT read a plain
+#                   `BALENA_TOKEN` from the environment, so the job logs in
+#                   explicitly below.
 #
 # Optional repository variable:
 #   BALENA_FLEET  - fleet slug; falls back to the value below.
