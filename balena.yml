@@ -12,7 +12,7 @@
 
 name: MarcDigital
 type: sw.application
-version: 1.0.0
+version: 1.1.0
 
 description: >-
   A digital photo frame for older family members. Relatives add photos to Azure
