@@ -38,8 +38,10 @@ services:
   # The slideshow keeps running throughout - the two services are independent,
   # so the frame shows its existing photos while waiting to be provisioned.
   wifi-connect:
-    # Architecture-specific image; this is the aarch64 build for raspberrypi4-64.
-    image: bh.cr/balenalabs/wifi-connect-aarch64
+    # Built from the upstream release, not the balenaLabs block: that block's
+    # published image dates from 2020 and dies on current balenaOS with
+    # "RsnFlags property failed: wrong property type". See wifi-connect/Dockerfile.
+    build: ./wifi-connect
     restart: always
     # Must share the host network stack to manage the real interfaces.
     network_mode: host

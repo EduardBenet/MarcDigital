@@ -2,13 +2,28 @@ name: Marc Digital
 
 on:
   push:
+    # Branches only. A bare `push:` also matches tag pushes, so tagging a commit
+    # that was already tested on its branch ran this workflow a second time on
+    # identical code - and then release.yml ran it a third time via
+    # workflow_call. Tags are release.yml's job; this is the branch gate.
+    branches:
+      - "**"
   pull_request:
+    branches:
+      - main
   # Callable so the release workflow can gate a balena deploy on these exact
   # checks, instead of duplicating them and letting the two drift apart.
   # NOTE: GitHub resolves a reusable workflow at the *calling ref's* commit, so
   # a tag created before this trigger existed fails with "workflow is not
   # reusable". Tags must point at a commit that contains this block.
   workflow_call:
+
+# One run per workflow+ref: pushing twice in quick succession cancels the stale
+# run rather than queueing both. A release verify is keyed on its tag ref, which
+# nothing else shares, so branch activity can never cancel a deploy in flight.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
