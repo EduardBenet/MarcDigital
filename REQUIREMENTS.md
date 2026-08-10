@@ -1,4 +1,4 @@
-# MarcDigital — Requirements & Project Spec
+# DigitalFrame — Requirements & Project Spec
 
 Authoritative spec for the project. Update this file when decisions change so it never has to be re-explained.
 
@@ -53,8 +53,11 @@ Running on real hardware (Pi 4, balena fleet `digiframe`) since 2026-08-09.
 - ✅ aarch64 Dockerfile + balena compose (the armv6 cross-compile hack is gone).
 - ✅ CI (fmt/clippy/test/build) and tag-driven release to balena + GitHub Releases.
 - ✅ Wi-Fi provisioning via the `wifi-connect` block (see §3.1).
+- ✅ EXIF orientation honoured in the render path (`kamadak-exif`); SDL2_image ignores the
+  tag, so photos straight off a phone camera rendered sideways without it.
+- ✅ **Companion app (§9b) — live since 2026-08-10.** Family can add and remove photos from
+  a phone; the maintainer is no longer the only route in.
 - 🚫 Nav buttons / GPIO — out of scope (time-based only).
-- ⏳ Companion app (§9b) — not started; today only the maintainer can add photos.
 - ⏳ Azurite integration tests — `src/store.rs` still has no test coverage.
 
 ## 7. Known gaps / tech debt
@@ -97,23 +100,32 @@ Open:
   save nothing but add per-read costs and 30/90-day minimum-retention early-deletion fees — bad for an
   add/delete workflow. Archive is disqualified (not instant-access). Standard / Hot / LRS.
 
-## 9b. Companion app — Azure Static Web Apps (Free)
-Family curates photos (view / add / delete) from phones. **Not** a native app and **not** store-published.
-- **Azure Static Web Apps Free tier** = one deployment bundling: PWA frontend + built-in auth +
-  managed Functions API. Works on iPhone (Safari) and Android (Chrome) as an installable PWA — just a URL,
-  no App Store / Play Store.
-- **Auth:** SWA built-in providers. **On the Free plan only GitHub and Microsoft Entra ID are available**
-  — Google (or any provider) needs custom OIDC, which is a **Standard-plan** feature (~$9/mo) and would
-  break "nearly free", so we do **not** use it. Family logs in with **Microsoft accounts** (Entra also
-  accepts personal Outlook/Hotmail/Live accounts — no work account needed) or GitHub. Invite family
-  (free tier: 25 invited custom-role users), assign a `family` role, restrict all routes + API via
-  `staticwebapp.config.json`. No passwords to build or leak.
-- **API:** managed Functions `list` / `upload` / `delete`; storage credential stays **server-side**
-  (app settings or managed identity). Client never holds Azure creds.
-- **Cost:** free tier (100 GB bandwidth, 1M function executions) dwarfs family usage.
-- **Storage account:** new account **`marcdigital`** (the old `benetmilian` is being retired/deleted,
-  which auto-revokes the leaked SAS). Container **`photos`**.
-- **Cleanup owed:** secrets already removed from the working tree (done); leaked SAS dies with the old
-  account; optional git-history purge remains. Fail fast when env is missing (implemented in `core::config`).
-- **Optional hardening:** a small token-broker backend that mints short-lived user-delegation SAS,
-  so the device holds only an app key — overkill for a family frame but the most secure option.
+## 9b. Companion app — BUILT, live since 2026-08-10
+Repo: **[DigitalFrameApp](https://github.com/EduardBenet/DigitalFrameApp)**, deployed to Azure Static Web
+Apps (Free). Its README is authoritative for setup; this section records only what the two projects share.
+
+Family curates photos (view / add / delete) from a phone. Not a native app, not store-published — an
+installable PWA behind a URL.
+
+- **The contract between the two is the container, and nothing else.** No shared code, no database, no
+  manifest file. The app writes blobs; the frame lists, downloads what it lacks, deletes what is gone.
+  Both ends independently implement the same filename rule — `safe_name()` in `core/src/sync.rs` and
+  `safeName()` in the app's `api/shared/blob.js`. **Change one and you must change the other**, or the
+  app will accept a name the frame refuses to store.
+- **The app never states the frame's timings.** It cannot observe the device — nothing reports back — so
+  any "arrives within N minutes" it displayed would silently become a lie when `ROTATION_SECONDS` or
+  `SYNC_INTERVAL_SECONDS` changed here. Deliberately removed rather than kept in sync by hand.
+- **Photos are stored byte for byte.** The app does not resize or re-encode on upload: that is lossy and
+  strips EXIF, and for a relative uploading their only copy this container is the archive. It is also why
+  the frame must read the orientation tag itself (§6) rather than relying on the uploader to bake it in.
+- **Two service principals, not one.** The frame's is **Storage Blob Data Reader**; the app's is
+  **Storage Blob Data Contributor**. Least privilege is the point — the frame cannot delete a photo even
+  if compromised.
+- **Auth:** SWA built-in providers with a `family` role by invitation. On the Free plan only GitHub and
+  Microsoft Entra ID are available (Entra accepts personal Outlook/Hotmail accounts); any other provider
+  needs custom OIDC, a Standard-plan feature (~$9/mo) that would break "nearly free".
+- **Cost:** free tier — 100 GB bandwidth, 1M executions, 25 invited users — dwarfs family usage.
+- **Storage:** container **`photos`**. The old `benetmilian` account is gone, which revoked the leaked SAS;
+  the git-history purge was dropped as pointless.
+- **Optional hardening, still unbuilt:** short-lived user-delegation SAS instead of proxying image bytes
+  through a Function, so the browser fetches from storage directly. Needs **Storage Blob Delegator**.

@@ -1,11 +1,15 @@
 # Digital Frame
 
-[![CI](https://github.com/EduardBenet/MarcDigital/actions/workflows/main.yml/badge.svg?branch=rust)](https://github.com/EduardBenet/MarcDigital/actions/workflows/main.yml)
-[![Release](https://github.com/EduardBenet/MarcDigital/actions/workflows/release.yml/badge.svg)](https://github.com/EduardBenet/MarcDigital/actions/workflows/release.yml)
+[![CI](https://github.com/EduardBenet/DigitalFrame/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/EduardBenet/DigitalFrame/actions/workflows/main.yml)
+[![Release](https://github.com/EduardBenet/DigitalFrame/actions/workflows/release.yml/badge.svg)](https://github.com/EduardBenet/DigitalFrame/actions/workflows/release.yml)
 
 A digital photo frame for older family members: relatives push photos to the cloud, the
 frame syncs them locally and shows a rotating fullscreen slideshow. Runs on a Raspberry Pi,
 fully automated. Written entirely in **Rust**.
+
+Relatives add and remove those photos from their phones through the companion app,
+[DigitalFrameApp](https://github.com/EduardBenet/DigitalFrameApp). The two share no code —
+only the blob container.
 
 > **See [`REQUIREMENTS.md`](./REQUIREMENTS.md) for the authoritative project spec** —
 > requirements, target hardware, status, and known gaps.
