@@ -1,5 +1,12 @@
-# Keep the build context small and secret-free. Nothing here is needed by the
-# Dockerfile, which copies only Cargo.toml/Cargo.lock, core/ and src/.
+# Keeps the build context small and secret-free.
+#
+# IMPORTANT: do NOT exclude docker-compose.yaml or balena.yml. `balena push`
+# applies these rules when tarring the project, not just when building an image,
+# so excluding the compose file makes the builder see a bare Dockerfile. balena
+# then deploys it as a single service named `main` - silently dropping the
+# volume mount and every other service. Symptom: photos vanish on each release
+# because the app is writing to the container layer instead of the volume, and
+# the log prefix changes from `digital_frame` to `main`.
 .git
 target
 synced_photos
@@ -10,6 +17,5 @@ synced_photos
 # Docs / CI / editor cruft
 .github
 .claude
-*.md
-!README.md
-docker-compose.yaml
+IMPLEMENTATION_PLAN.md
+REQUIREMENTS.md
