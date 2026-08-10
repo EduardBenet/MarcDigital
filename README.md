@@ -1,4 +1,4 @@
-# MarcDigital
+# Digital Frame
 
 [![CI](https://github.com/EduardBenet/MarcDigital/actions/workflows/main.yml/badge.svg?branch=rust)](https://github.com/EduardBenet/MarcDigital/actions/workflows/main.yml)
 [![Release](https://github.com/EduardBenet/MarcDigital/actions/workflows/release.yml/badge.svg)](https://github.com/EduardBenet/MarcDigital/actions/workflows/release.yml)
