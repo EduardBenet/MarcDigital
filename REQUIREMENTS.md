@@ -60,6 +60,17 @@ Running on real hardware (Pi 4, balena fleet `digiframe`) since 2026-08-09.
 - 🚫 Nav buttons / GPIO — out of scope (time-based only).
 - ⏳ Azurite integration tests — `src/store.rs` still has no test coverage.
 
+### Naming — SETTLED 2026-08-10, do not "clean up"
+The project is **Digital Frame**; the old *MarcDigital* name is gone from everything
+user-facing. Two references remain on purpose and are not debt:
+
+- **`PORTAL_SSID=MarcDigital Setup`** (`docker-compose.yaml`, `wifi-connect/start.sh`) — the
+  hotspot name a relative sees when provisioning a frame. Kept because it is liked.
+- **`MarcDigital` as the crate name** (`Cargo.toml`, and therefore
+  `target/release/MarcDigital` in the `Dockerfile`), plus `marcdigital-core` and
+  `MARCDIGITAL_VERBOSE`. Purely build-internal, consistent end to end, and never seen by
+  anyone using the frame. Renaming would mean a rebuild and a release for no benefit.
+
 ## 7. Known gaps / tech debt
 Resolved: the leaked SAS (the `benetmilian` account was deleted, so it cannot be used —
 the git-history purge was dropped as pointless); sync-once-at-boot; the `.unwrap()`s in the
