@@ -1,7 +1,7 @@
 [package]
 name = "marcdigital-core"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # Pure logic (config, sync diff). Deliberately depends on NOTHING heavy (no SDL2,
 # no Azure SDK) so `cargo test -p marcdigital-core` compiles in seconds anywhere.

@@ -22,8 +22,8 @@ use sdl2::rect::Rect;
 use sdl2::render::{Texture, TextureCreator};
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use marcdigital_core::config::Config;
 use marcdigital_core::sync::run_sync;
@@ -301,7 +301,7 @@ fn load_current<'a>(
                     texture,
                     rotation,
                     flip_h: orientation.flip_h,
-                })
+                });
             }
             Err(e) => {
                 // Skipping is deliberate: one bad file must not take the frame
@@ -409,10 +409,10 @@ fn log_display_environment() {
 /// file) is honoured first when present, then the sensible defaults for a Pi.
 fn init_video(sdl: &sdl2::Sdl) -> Result<sdl2::VideoSubsystem, String> {
     let mut candidates: Vec<String> = Vec::new();
-    if let Ok(preferred) = std::env::var("SDL_VIDEODRIVER") {
-        if !preferred.trim().is_empty() {
-            candidates.push(preferred.trim().to_string());
-        }
+    if let Ok(preferred) = std::env::var("SDL_VIDEODRIVER")
+        && !preferred.trim().is_empty()
+    {
+        candidates.push(preferred.trim().to_string());
     }
     for fallback in ["kmsdrm", "x11", "wayland"] {
         if !candidates.iter().any(|c| c == fallback) {
@@ -422,11 +422,25 @@ fn init_video(sdl: &sdl2::Sdl) -> Result<sdl2::VideoSubsystem, String> {
 
     let mut errors = Vec::new();
     for driver in &candidates {
-        // SDL reads this at subsystem-init time, so it must be set per attempt.
-        std::env::set_var("SDL_VIDEODRIVER", driver);
+        // SDL reads the driver name at subsystem-init time, so it has to be set
+        // per attempt - but as a *hint*, not an environment variable. By this
+        // point the sync task and the Azure SDK are live on other threads, and
+        // `set_var` racing their `getenv` is undefined behaviour in glibc (which
+        // is why edition 2024 makes it unsafe).
+        //
+        // Override priority is load-bearing, not tidiness: SDL_GetHint returns
+        // the *environment* value in preference to a normal-priority hint, and
+        // docker-compose.yaml sets SDL_VIDEODRIVER=kmsdrm. At normal priority
+        // every attempt after the first would be silently ignored and this
+        // fallback loop would do nothing at all.
+        sdl2::hint::set_with_priority("SDL_VIDEODRIVER", driver, &sdl2::hint::Hint::Override);
         match sdl.video() {
             Ok(video) => {
-                logln!("Video driver in use: {driver}");
+                // Report what SDL actually settled on rather than what we asked
+                // for. The two are the same only while the hint is honoured, and
+                // if some build ever ignores it that shows up here instead of the
+                // frame quietly running on a different backend.
+                logln!("Video driver in use: {}", video.current_video_driver());
                 return Ok(video);
             }
             Err(e) => {

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// Required (no defaults — missing means we refuse to start).
 const REQUIRED: &[&str] = &[
@@ -176,7 +176,7 @@ mod tests {
     use std::collections::HashMap;
 
     /// Build a getter over a fixed map (no global env involved).
-    fn source(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+    fn source(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
         let map: HashMap<String, String> = pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))

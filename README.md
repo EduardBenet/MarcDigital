@@ -72,9 +72,10 @@ The container targets **aarch64**. `docker-compose.yaml` is what balena builds f
 (`git push balena <branch>:master`); balena's builders are arm64, so there is no
 cross-compile step there.
 
-Do **not** run `docker compose up --build` on an x86 dev machine: the builder stage
-has no `--platform`, so it would produce an x86 binary inside an arm64 runtime image
-and fail with `exec format error`. To build the real image locally, emulate:
+The builder stage is pinned to `--platform=linux/arm64`, so building on an x86 dev
+machine is safe: it emulates through QEMU rather than silently producing an x86
+binary inside the arm64 runtime image (which used to fail only on the device, with
+`exec format error`). To build the real image locally:
 ```
 docker buildx build --platform linux/arm64 -t marcdigital:arm64 .
 ```
@@ -103,12 +104,17 @@ Remaining gaps:
 - No integration tests against Azurite, and `src/store.rs` (the Azure client) has no
   tests at all (Phase 3.2/3.3).
 - CI runs fmt/clippy/test/build but no arm64 image build and no secret scan (Phase 7).
-- The leaked SAS is still in git history; the token is expired, but the purge
-  (Phase 0.3) has not been run.
 - Only one device is deployed; multi-device and reboot-survival checks are untested
   (Phase 8.5/8.6).
-- Out of scope by design: first-boot Wi-Fi onboarding (balena handles it) and
-  prev/next navigation buttons (advance is purely time-based).
+- Out of scope by design: prev/next navigation buttons (advance is purely time-based).
+
+First-boot Wi-Fi onboarding is **not** out of scope and is **not** handled by balenaOS —
+that assumption was wrong, and a frame handed to a relative could never have joined
+their network. It ships as the separate `wifi-connect` service in `docker-compose.yaml`
+(see REQUIREMENTS.md §3.1).
+
+The leaked SAS in git history is settled, not outstanding: the storage account that
+signed it was deleted, so the purge was dropped as pointless rather than deferred.
 
 ## Display setup (DSI panels on a Pi 4)
 

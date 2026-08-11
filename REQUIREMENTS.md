@@ -6,7 +6,14 @@ Authoritative spec for the project. Update this file when decisions change so it
 A **digital photo frame** for older family members. Relatives push photos to cloud storage; the frame syncs them and displays a rotating slideshow. Runs on a Raspberry Pi, fully automated (boots straight into the slideshow, no desktop/file access).
 
 ## 2. Language & stack
-- **Entirely in Rust.** Any Python in the tree is legacy and has been removed.
+- **Entirely in Rust, edition 2024** (both workspace crates; floor is Rust 1.85).
+  Any Python in the tree is legacy and has been removed.
+- **The video-driver probe sets an SDL *hint*, never an environment variable.** `set_var`
+  races every other thread's `getenv` — the sync task and the Azure SDK are both live by
+  the time the display opens — which is UB in glibc and `unsafe` from edition 2024 on.
+  `sdl2::hint::set_with_priority(..., Hint::Override)`; **Override is required**, because
+  `SDL_GetHint` prefers the environment over a normal-priority hint and `docker-compose.yaml`
+  sets `SDL_VIDEODRIVER=kmsdrm`.
 - Rendering: **SDL2** (`sdl2` crate, image + static-link features), fullscreen slideshow.
 - Async runtime: **tokio**.
 - Cloud: **Azure Blob Storage** (`azure_storage_blob`, `azure_identity`, `azure_core`).
@@ -74,15 +81,13 @@ user-facing. Two references remain on purpose and are not debt:
 ## 7. Known gaps / tech debt
 Resolved: the leaked SAS (the `benetmilian` account was deleted, so it cannot be used —
 the git-history purge was dropped as pointless); sync-once-at-boot; the `.unwrap()`s in the
-render path; the split async model; Python-only CI.
+render path; the split async model; Python-only CI; the `std::env::set_var` race in the
+video-driver probe (now an SDL hint — see §2); the missing `--platform` on the Dockerfile
+builder stage (pinned to `linux/arm64`).
 
 Open:
 - **`src/store.rs` has no tests.** The Azure client is the only component verified purely by
   hand. Azurite integration tests are the fix (§ Implementation Plan 3.2).
-- **`std::env::set_var` runs inside the multi-threaded tokio runtime** (`src/main.rs`,
-  video-driver selection). Unsound in principle, and a hard error on edition 2024.
-- **Dockerfile builder stage has no `--platform`.** Correct on balena's arm64 builders;
-  `docker compose up --build` on an x86 dev machine silently produces an unusable image.
 - **Secrets are plaintext in the balena dashboard.** No masked-variable feature exists.
   Mitigated by least privilege (read-only, one container) rather than solved; the token
   broker in §9 is the real fix if it ever matters.

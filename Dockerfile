@@ -1,9 +1,27 @@
+# check=skip=FromPlatformFlagConstDisallowed
+# ^ deliberate: see the note above the builder stage. Must stay the first line -
+#   a parser directive is ignored once any comment or instruction precedes it.
+
 # Native aarch64 build for the Raspberry Pi 4 Model B (balena device type
 # `raspberrypi4-64`). Balena builds arm64 natively, so there is no cross-compile
 # step: the old `raspberrypi/tools` armv6 hack and the matching
 # `.cargo/config.toml` target block are gone (see REQUIREMENTS.md §8).
 
-FROM rust:1.97-bookworm AS builder
+# Both stages pin the platform rather than inheriting it. On balena's arm64
+# builders this is a no-op; anywhere else it is what stops a silent mistake.
+# The runtime base is arm64-only, so with an unpinned builder an x86
+# `docker compose up --build` resolves this image to amd64, compiles an x86
+# binary into an arm64 image, and the failure surfaces only on the device as
+# `exec format error`. Pinned, the same build emulates through QEMU (slow but
+# correct) instead.
+#
+# `docker build --check` objects to the constant ("should not use constant
+# value"), because the idiomatic form is $BUILDPLATFORM/$TARGETPLATFORM for
+# images meant to be built for many architectures. This one is not: it targets
+# exactly one device type, and $TARGETPLATFORM would silently fall back to the
+# host's architecture whenever no --platform flag is passed - which is the exact
+# bug being fixed. The warning is expected; keep the constant.
+FROM --platform=linux/arm64 rust:1.97-bookworm AS builder
 
 # SDL2 headers to compile against, plus cmake/pkg-config for the native deps
 # (aws-lc-sys, pulled in by the Azure SDK's rustls stack, needs cmake).
@@ -26,7 +44,10 @@ COPY src ./src
 RUN cargo build --release --locked
 
 # Runtime: balena's Debian bookworm base, same glibc as the builder image.
-FROM balenalib/raspberrypi4-64-debian:bookworm-run
+# Pinned for the same reason as the builder above - and because this image is
+# published for arm64 only, so an unpinned stage on an x86 host produces an
+# image whose metadata claims amd64 while its contents are arm64.
+FROM --platform=linux/arm64 balenalib/raspberrypi4-64-debian:bookworm-run
 
 # Shared libs only - SDL2 is linked dynamically (REQUIREMENTS.md §8).
 #
